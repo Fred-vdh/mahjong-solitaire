@@ -16,10 +16,6 @@ Un jeu de Mahjong Solitaire élégant développé en Python avec Pygame, offrant
 
 ## 🚀 Installation et Lancement
 
-### Pour les joueurs (Windows)
-Vous pouvez trouver l'exécutable dans le dossier `dist/` (si disponible) ou le compiler vous-même.
-
-### Pour les développeurs
 1. Assurez-vous d'avoir Python installé.
 2. Installez les dépendances :
    ```bash
@@ -38,7 +34,6 @@ Vous pouvez trouver l'exécutable dans le dossier `dist/` (si disponible) ou le 
 - **Python 3**
 - **Pygame** : Moteur de rendu 2D.
 - **NumPy** : Calculs mathématiques pour les animations.
-- **PyInstaller** : Pour la création de l'exécutable.
 
 ---
 Développé par **Fred-vdh**
