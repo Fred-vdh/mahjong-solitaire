@@ -649,6 +649,7 @@ class MahjongGame:
                 base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease
                 
                 arc_sin = np.sin(np.pi * tile_prog)
+                d['arc_sin'] = arc_sin
                 dx, dy = d['end_pos'][0] - d['start_pos'][0], d['end_pos'][1] - d['start_pos'][1]
                 px, py = -dy, dx
                 length = (px**2 + py**2)**0.5 or 1
@@ -663,6 +664,12 @@ class MahjongGame:
                 # Organic tilt and scale
                 d['rot'] = arc_sin * d['max_tilt']
                 d['scale'] = 1.0 + arc_sin * d.get('scale_mod', 0.4)
+                
+                # Interpolate gray shading during flight
+                t_obj = d['tile']
+                start_ga = d.get('start_gray_alpha', 0.0)
+                target_ga = t_obj.get('target_gray_alpha', 0.0)
+                t_obj['gray_alpha'] = start_ga + (target_ga - start_ga) * tile_prog
                 
             if all_finished and total_prog >= 1.0:
                 self.shuffle_anim_state = 'settling'
@@ -775,11 +782,11 @@ class MahjongGame:
                             'score_value': -penalty,
                             'progress': 0.0
                         })
-        if self.shuffle_anim_state in ('idle', 'fading_out'):
+        if self.shuffle_anim_state in ('idle', 'fading_out', 'settling'):
             for t in self.layout:
                 ta = t.get('target_gray_alpha', 0.0); ca = t.get('gray_alpha', ta)
-                if ca < ta: t['gray_alpha'] = min(ta, ca + 4.0)
-                elif ca > ta: t['gray_alpha'] = max(ta, ca - 4.0)
+                if ca < ta: t['gray_alpha'] = min(ta, ca + 1.5)
+                elif ca > ta: t['gray_alpha'] = max(ta, ca - 1.5)
         fin = []
         for a in self.animating_tiles:
             dx, dy = a['target'][0]-a['pos'][0], a['target'][1]-a['pos'][1]; dist = (dx**2+dy**2)**0.5
@@ -1050,6 +1057,9 @@ class MahjongGame:
             for d in self.shuffle_tiles_data:
                 tile_type, x, y = d['type'], d['current_pos'][0], d['current_pos'][1]
                 img = self.tile_variants[tile_type]['filtered']
+                # Dynamic Shadow based on height (arc_sin)
+                h = d.get('arc_sin', 0.0)
+                sh_off = 2 + int(h * 15) # Offset increases with height
                 # Apply scaling
                 scale = d.get('scale', 1.0)
                 if scale != 1.0:
@@ -1058,9 +1068,9 @@ class MahjongGame:
                 # Apply rotation
                 rot = d.get('rot', 0.0)
                 if abs(rot) > 0.1: img = pygame.transform.rotate(img, rot)
-                # Shadow
+                # Dynamic Shadow Drawing
                 rect = img.get_rect(center=(int(x + self.tw//2), int(y + self.th//2)))
-                self.screen.blit(self.shadow_surf, rect.move(2, 2))
+                self.screen.blit(self.shadow_surf, rect.move(sh_off, sh_off))
                 self.screen.blit(img, rect)
         else:
             self.sorted_layout.sort(key=lambda t: (t['pos'][2], t['pos'][0] + t['pos'][1])); tot = len(self.sorted_layout); rad = max(3, int(self.tw/12))
