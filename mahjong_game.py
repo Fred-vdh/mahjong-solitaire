@@ -1171,8 +1171,14 @@ class MahjongGame:
             if final_h > 0:
                 self.stats_rows_rects.append({'rect': pygame.Rect(ix, final_y, iw, final_h), 'level_index': i})
 
+            # Add row separator
+            pygame.draw.line(rows_view, (60, 60, 70), (0, ry + row_h), (clip_rect.width, ry + row_h), 1)
+
             if preview:
                 rows_view.blit(preview, (0, ry))
+            
+            # Restore level name
+            rows_view.blit(f_row.render(name, True, (220, 220, 220)), (140, ry + 30))
             s = self.level_stats.get(name)
             if s:
                 bt = s.get("best_time")
