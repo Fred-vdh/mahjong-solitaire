@@ -44,7 +44,7 @@ class MahjongGame:
             if hMonitor != 0:
                 ctypes.windll.user32.SetWindowPos(hwnd, 0, x, y, 0, 0, 0x0001)
         
-        pygame.display.set_caption("Mahjong Solitaire Master V15.2")
+        pygame.display.set_caption("Mahjong-solitaire 1.0")
         self.clock = pygame.time.Clock()
         
         self.tile_images_hd = []

@@ -1,4 +1,4 @@
-# Mahjong Solitaire Master
+# Mahjong-solitaire 1.0
 
 Un jeu de Mahjong Solitaire élégant développé en Python avec Pygame, offrant une expérience visuelle riche et des fonctionnalités avancées.
 

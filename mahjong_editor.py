@@ -59,7 +59,7 @@ class MahjongEditor:
         pygame.init()
         self.width, self.height = BASE_WIDTH, BASE_HEIGHT
         self.screen = pygame.display.set_mode((self.width, self.height), pygame.RESIZABLE)
-        pygame.display.set_caption("Mahjong Level Editor Pro")
+        pygame.display.set_caption("Mahjong-solitaire Editor 1.0")
         self.clock = pygame.time.Clock()
         
         self.tile_images_hd = []
