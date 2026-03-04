@@ -1162,12 +1162,17 @@ class MahjongGame:
         pygame.draw.line(stats_surf, (100, 100, 100), (40, hy+30), (sw-40, hy+30), 1); row_h, clip_rect = 80, pygame.Rect(40, hy + 40, sw - 80, sh - hy - 100); content_h = len(self.layout_names) * row_h; self.stats_rows_rects = []; rows_view = pygame.Surface((clip_rect.width, clip_rect.height), pygame.SRCALPHA); start_idx, end_idx = max(0, self.stats_scroll_y // row_h), min(len(self.layout_names), (self.stats_scroll_y + clip_rect.height) // row_h + 1)
         for display_idx in range(start_idx, end_idx):
             i = self.stats_display_indices[display_idx]; name, ry = self.layout_names[i], display_idx * row_h - self.stats_scroll_y; preview, pw_icon = self.level_previews.get(name), 100
-            final_y, final_h = 0, 0
+            
+            # Make the entire row clickable
+            ix, iy, iw, ih = sx + clip_rect.x * scale, sy + (clip_rect.y + ry) * scale, clip_rect.width * scale, row_h * scale
+            g_clip_top, g_clip_bottom = sy + clip_rect.y * scale, sy + (clip_rect.y + clip_rect.height) * scale
+            final_y = max(iy, g_clip_top)
+            final_h = min(iy + ih, g_clip_bottom) - final_y
+            if final_h > 0:
+                self.stats_rows_rects.append({'rect': pygame.Rect(ix, final_y, iw, final_h), 'level_index': i})
+
             if preview:
-                rows_view.blit(preview, (0, ry)); pw_icon = preview.get_width()
-                ix, iy, iw, ih = sx + (clip_rect.x + 0) * scale, sy + (clip_rect.y + ry) * scale, pw_icon * scale, 80 * scale; g_clip_top, g_clip_bottom = sy + clip_rect.y * scale, sy + (clip_rect.y + clip_rect.height) * scale; final_y, final_h = max(iy, g_clip_top), min(iy + ih, g_clip_bottom) - final_y
-            if final_h > 0: self.stats_rows_rects.append({'rect': pygame.Rect(ix, final_y, iw, final_h), 'level_index': i})
-            rows_view.blit(f_row.render(name, True, (220, 220, 220)), (140, ry + 30))
+                rows_view.blit(preview, (0, ry))
             s = self.level_stats.get(name)
             if s:
                 bt = s.get("best_time")
