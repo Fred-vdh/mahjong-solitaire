@@ -1,0 +1,91 @@
+    def get_layout_positions(self, l_id):
+        grid = [[[False for _ in range(14)] for _ in range(24)] for _ in range(4)]
+        final_tiles = []
+
+        def can_place(x, y, z):
+            z_idx = int(z)
+            if x < 0 or x > 11 or y < 0 or y > 6 or z_idx < 0 or z_idx > 3: return False
+            hx_start, hy_start = int(2*x), int(2*y)
+            for hx in range(hx_start, hx_start + 2):
+                for hy in range(hy_start, hy_start + 2):
+                    if grid[z_idx][hx][hy]: return False
+            if z_idx > 0:
+                for hx in range(hx_start, hx_start + 2):
+                    for hy in range(hy_start, hy_start + 2):
+                        if not grid[z_idx-1][hx][hy]: return False
+                is_offset = not (float(x).is_integer() and float(y).is_integer())
+                if (z_idx % 2 != 0) != is_offset: return False
+            return True
+
+        def place(x, y, z):
+            if not can_place(x, y, z): return False
+            z_idx = int(z)
+            hx_start, hy_start = int(2*x), int(2*y)
+            for hx in range(hx_start, hx_start + 2):
+                for hy in range(hy_start, hy_start + 2): grid[z_idx][hx][hy] = True
+            final_tiles.append((float(x), float(y), float(z)))
+            return True
+
+        # --- DÉFINITION DES 10 LAYOUTS SUR 4 COUCHES ---
+        for z in range(4):
+            off = 0.5 if z % 2 != 0 else 0.0
+            if l_id == 0: # Tortue
+                m = z * 0.5 + (1 if z < 2 else 2)
+                for r in np.arange(m, 7 - m, 1):
+                    for c in np.arange(m, 12 - m, 1): place(c + off, r + off, z)
+                if z == 0:
+                    for c in range(4, 8): place(float(c), 0.0, 0); place(float(c), 6.0, 0)
+                    for r in range(2, 5): place(0.0, float(r), 0); place(11.0, float(r), 0)
+            elif l_id == 1: # Mur
+                for r in range(7):
+                    for c in [0, 1, 10, 11]: place(c + off, r + off, z)
+                for c in range(2, 10):
+                    for r in [0, 6]: place(c + off, r + off, z)
+            elif l_id == 2: # Pyramide
+                m = z * 0.5
+                for r in np.arange(m + 1, 6 - m, 1):
+                    for c in np.arange(m * 2 + 1, 11 - m * 2, 1): place(c + off, r + off, z)
+            elif l_id == 3: # Arène
+                for r in np.arange(0, 7, 1):
+                    for c in np.arange(0, 12, 1):
+                        if abs(c-5.5) > 1.5 + z or abs(r-3) > 1.0 + z*0.5: place(c + off, r + off, z)
+            elif l_id == 4: # Croix
+                for r in np.arange(0, 7, 1):
+                    for c in np.arange(0, 12, 1):
+                        if abs(c-5.5) < 3-z or abs(r-3) < 2-z*0.5: place(c + off, r + off, z)
+            elif l_id == 5: # Papillon
+                for r in np.arange(0, 7, 1):
+                    for c in np.arange(0, 12, 1):
+                        if abs(c-5.5) > 0.5 + z*0.5: place(c + off, r + off, z)
+            elif l_id == 6: # Sablier
+                for r in np.arange(0, 7, 1):
+                    for c in np.arange(0, 12, 1):
+                        if abs(c-5.5) < abs(r-3) + 1 - z*0.5: place(c + off, r + off, z)
+            elif l_id == 7: # Temple
+                if z < 3:
+                    for c in [1, 2, 9, 10]:
+                        for r in [1, 5]: place(c + off, r + off, z)
+                if z >= 2:
+                    for r in np.arange(1, 6, 1):
+                        for c in np.arange(1, 11, 1): place(c + off, r + off, z)
+            elif l_id == 8: # Diamant
+                for r in np.arange(0, 7, 1):
+                    for c in np.arange(0, 12, 1):
+                        if abs(c-5.5) + abs(r-3)*1.5 < 7 - z: place(c + off, r + off, z)
+            elif l_id == 9: # Serpent
+                for i in np.arange(0, 12 - z, 1):
+                    r = 3 + int(2 * np.sin((i + z) * 0.5)); place(i + off, r + off, z)
+
+        if len(final_tiles) > 144:
+            final_tiles.sort(key=lambda t: t[2], reverse=True); final_tiles = final_tiles[len(final_tiles)-144:]
+        while len(final_tiles) < 110:
+            added = False
+            for r in range(7):
+                for c in range(12):
+                    if place(float(c), float(r), 0.0): 
+                        added = True
+                        if len(final_tiles) >= 110: break
+                if len(final_tiles) >= 110: break
+            if not added: break
+        if len(final_tiles) % 2 != 0: final_tiles.pop()
+        return final_tiles

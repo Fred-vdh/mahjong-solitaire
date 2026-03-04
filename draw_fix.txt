@@ -1,0 +1,50 @@
+        mx, my = (self.width-12*self.tw)//2, (self.height-7*self.th)//2
+        # Special Draw Loop for Shuffle Animation
+        if self.shuffle_anim_state != 'idle':
+            for i,d in enumerate(self.shuffle_tiles_data):
+                tile = d['tile']; is_free = tile.get('free', True)
+                x, y = d['current_pos'][0], d['current_pos'][1]+get_off_y(tile,i,len(self.shuffle_tiles_data))
+                self.screen.blit(self.shadow_surf, (x+2, y+2))
+                temp_rect = pygame.Rect(x, y, self.tw, self.th)
+                
+                # 3D Sides
+                for j in range(self.depth_off, 0, -1):
+                    fac = (self.depth_off-j)/self.depth_off
+                    side_color = (int(150*fac), int(110*fac), int(110*fac))
+                    pygame.draw.rect(self.screen, side_color, temp_rect.move(j,j), border_radius=5)
+                    if not is_free:
+                        s_g = pygame.Surface((self.tw, self.th), pygame.SRCALPHA); s_g.fill((0, 0, 0, 120))
+                        self.screen.blit(s_g, (x+j, y+j))
+                
+                # Face
+                self.screen.blit(self.tile_variants[tile['type']]['filtered'],(x,y))
+                if not is_free:
+                    s_g = pygame.Surface((self.tw, self.th), pygame.SRCALPHA); s_g.fill((0, 0, 0, 120)); self.screen.blit(s_g, (x, y))
+                else: pygame.draw.rect(self.screen,(255,255,255,100),temp_rect,1,5)
+        
+        else:
+            tot = len(self.sorted_layout)
+            for i,t in enumerate(self.sorted_layout):
+                is_free = t.get('free', True)
+                x, y = mx+t['pos'][0]*self.tw-t['pos'][2]*self.depth_off, my+t['pos'][1]*self.th-t['pos'][2]*self.depth_off+get_off_y(t,i,tot)
+                t['rect'] = pygame.Rect(x,y,self.tw,self.th); self.screen.blit(self.shadow_surf, (x+2, y+2))
+                
+                # 3D Sides
+                for j in range(self.depth_off, 0, -1):
+                    fac = (self.depth_off-j)/self.depth_off
+                    side_color = (int(150*fac), int(110*fac), int(110*fac))
+                    pygame.draw.rect(self.screen, side_color, t['rect'].move(j,j), border_radius=5)
+                    if not is_free:
+                        s_g = pygame.Surface((self.tw, self.th), pygame.SRCALPHA); s_g.fill((0, 0, 0, 120))
+                        self.screen.blit(s_g, (x+j, y+j))
+
+                # Face
+                self.screen.blit(self.tile_variants[t['type']]['filtered'], (x, y))
+                if not is_free:
+                    s_g = pygame.Surface((self.tw, self.th), pygame.SRCALPHA); s_g.fill((0, 0, 0, 120)); self.screen.blit(s_g, (x, y))
+                else: pygame.draw.rect(self.screen, (255, 255, 255, 100), t['rect'], 1, 5)
+                
+                if self.selected==t: pygame.draw.rect(self.screen,(255,255,0),t['rect'],6,5)
+                elif self.hint_pair and t in self.hint_pair:
+                    alp = int(128+127*np.sin(pygame.time.get_ticks()*0.01))
+                    s=pygame.Surface((self.tw,self.th),pygame.SRCALPHA); pygame.draw.rect(s,(0,191,255,alp),s.get_rect(),8,5); self.screen.blit(s,(x,y))
