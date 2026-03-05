@@ -357,7 +357,19 @@ class MahjongGame:
                 sf = pygame.Surface((self.tw, self.th), pygame.SRCALPHA); sf.fill((255, 165, 0, 45)); filtered.blit(sf, (0, 0))
             elif i >= nt - 4:
                 ff = pygame.Surface((self.tw, self.th), pygame.SRCALPHA); ff.fill((0, 255, 0, 35)); filtered.blit(ff, (0, 0))
-            self.tile_variants.append({'normal': base, 'filtered': filtered})
+            
+            # Create 3D version for shuffle animation
+            tw3d, th3d = self.tw + self.depth_off, self.th + self.depth_off
+            surf_3d = pygame.Surface((tw3d, th3d), pygame.SRCALPHA)
+            rad_3d = int(self.tw / 12)
+            for j in range(self.depth_off, 0, -1):
+                fac = (self.depth_off - j) / (self.depth_off - 1) if self.depth_off > 1 else 1.0
+                v = int(100 + (160 - 100) * (fac**3))
+                side_c = (75, 50, 25) if j >= self.depth_off - 1 else (v, int(v*0.96), int(v*0.85))
+                pygame.draw.rect(surf_3d, side_c, (j, j, self.tw, self.th), border_radius=rad_3d)
+            surf_3d.blit(filtered, (0, 0))
+            
+            self.tile_variants.append({'normal': base, 'filtered': filtered, '3d': surf_3d})
             
             std_scaled = pygame.transform.smoothscale(img_hd, (self.std_tw, self.std_th))
             # Apply ivory tint to standard (victory) tiles
@@ -629,7 +641,7 @@ class MahjongGame:
                     'arc_dir': random.uniform(-1.0, 1.0),
                     'max_tilt': random.uniform(-45, 45), 
                     'scale_mod': random.uniform(0.2, 0.5),
-                    'rot': 0.0, 'scale': 1.0
+                    'rot': 0.0, 'scale': 1.0, 'arc_sin': 0.0
                 })
         self.shuffle_tiles_data.sort(key=lambda d: (d['tile']['pos'][2], d['tile']['pos'][1], d['tile']['pos'][0]))
 
@@ -664,12 +676,6 @@ class MahjongGame:
                 # Organic tilt and scale
                 d['rot'] = arc_sin * d['max_tilt']
                 d['scale'] = 1.0 + arc_sin * d.get('scale_mod', 0.4)
-                
-                # Interpolate gray shading during flight
-                t_obj = d['tile']
-                start_ga = d.get('start_gray_alpha', 0.0)
-                target_ga = t_obj.get('target_gray_alpha', 0.0)
-                t_obj['gray_alpha'] = start_ga + (target_ga - start_ga) * tile_prog
                 
             if all_finished and total_prog >= 1.0:
                 self.shuffle_anim_state = 'settling'
@@ -782,11 +788,11 @@ class MahjongGame:
                             'score_value': -penalty,
                             'progress': 0.0
                         })
-        if self.shuffle_anim_state in ('idle', 'fading_out', 'settling'):
+        if self.shuffle_anim_state in ('idle', 'fading_out'):
             for t in self.layout:
                 ta = t.get('target_gray_alpha', 0.0); ca = t.get('gray_alpha', ta)
-                if ca < ta: t['gray_alpha'] = min(ta, ca + 1.5)
-                elif ca > ta: t['gray_alpha'] = max(ta, ca - 1.5)
+                if ca < ta: t['gray_alpha'] = min(ta, ca + 4.0)
+                elif ca > ta: t['gray_alpha'] = max(ta, ca - 4.0)
         fin = []
         for a in self.animating_tiles:
             dx, dy = a['target'][0]-a['pos'][0], a['target'][1]-a['pos'][1]; dist = (dx**2+dy**2)**0.5
@@ -1056,20 +1062,22 @@ class MahjongGame:
         if self.shuffle_anim_state == 'moving':
             for d in self.shuffle_tiles_data:
                 tile_type, x, y = d['type'], d['current_pos'][0], d['current_pos'][1]
-                img = self.tile_variants[tile_type]['filtered']
+                # Use the 3D variant that includes the sides
+                img = self.tile_variants[tile_type].get('3d', self.tile_variants[tile_type]['filtered'])
                 # Dynamic Shadow based on height (arc_sin)
                 h = d.get('arc_sin', 0.0)
                 sh_off = 2 + int(h * 15) # Offset increases with height
                 # Apply scaling
                 scale = d.get('scale', 1.0)
                 if scale != 1.0:
-                    sw, sh = int(self.tw * scale), int(self.th * scale)
+                    sw, sh = int(img.get_width() * scale), int(img.get_height() * scale)
                     if sw > 0 and sh > 0: img = pygame.transform.smoothscale(img, (sw, sh))
                 # Apply rotation
                 rot = d.get('rot', 0.0)
                 if abs(rot) > 0.1: img = pygame.transform.rotate(img, rot)
-                # Dynamic Shadow Drawing
-                rect = img.get_rect(center=(int(x + self.tw//2), int(y + self.th//2)))
+                # Shadow
+                # Adjusted center to account for the 3D depth offset and prevent jumping
+                rect = img.get_rect(center=(int(x + self.tw//2 + self.depth_off//2), int(y + self.th//2 + self.depth_off//2)))
                 self.screen.blit(self.shadow_surf, rect.move(sh_off, sh_off))
                 self.screen.blit(img, rect)
         else:
