@@ -361,7 +361,7 @@ class MahjongGame:
             # Create 3D version for shuffle animation
             tw3d, th3d = self.tw + self.depth_off, self.th + self.depth_off
             surf_3d = pygame.Surface((tw3d, th3d), pygame.SRCALPHA)
-            rad_3d = int(self.tw / 12)
+            rad_3d = max(3, int(self.tw / 12))
             for j in range(self.depth_off, 0, -1):
                 fac = (self.depth_off - j) / (self.depth_off - 1) if self.depth_off > 1 else 1.0
                 v = int(100 + (160 - 100) * (fac**3))
@@ -600,7 +600,7 @@ class MahjongGame:
         f_val = pygame.font.SysFont("Arial", 22, bold=True)
         score_str = str(self.displayed_score)
         val_w, val_h = f_val.size(score_str)
-        return (140 + val_w // 2, 51 + val_h // 2)
+        return (110 + val_w // 2, 51 + val_h // 2)
 
     def start_shuffle_animation(self, start_pos=None):
         if not self.layout: return
@@ -636,19 +636,21 @@ class MahjongGame:
             if found_idx != -1:
                 old = old_data[found_idx]; sx = mx + old['pos'][0]*(self.tw+2) - old['pos'][2]*self.depth_off; sy = my + old['pos'][1]*(self.th+2) - old['pos'][2]*self.depth_off
                 ex = mx + t['pos'][0]*(self.tw+2) - t['pos'][2]*self.depth_off; ey = my + t['pos'][1]*(self.th+2) - t['pos'][2]*self.depth_off
-                # Organic parameters: individual delay, speed variation, and tilt
+                
+                # Dynamic Z-sorting scores to prevent "clics"
+                start_z = old['pos'][2] * 10000 + old['pos'][1] * 100 + old['pos'][0]
+                end_z = t['pos'][2] * 10000 + t['pos'][1] * 100 + t['pos'][0]
+                
                 self.shuffle_tiles_data.append({
                     'type': target_type, 'start_pos': (sx, sy), 'current_pos': [sx, sy], 'end_pos': (ex, ey), 
-                    'tile': t, 
-                    'delay': random.uniform(0, 0.5), # Slightly less staggered
-                    'speed_mod': random.uniform(0.6, 1.4), 
-                    'arc_strength': random.uniform(50, 200), # Reduced strength to stay on screen
-                    'arc_dir': random.uniform(-1.0, 1.0),
-                    'max_tilt': random.uniform(-45, 45), 
-                    'scale_mod': random.uniform(0.2, 0.5),
+                    'tile': t, 'start_z': start_z, 'end_z': end_z,
+                    'delay': random.uniform(0, 0.5), 'speed_mod': random.uniform(0.6, 1.4), 
+                    'arc_strength': random.uniform(50, 200), 'arc_dir': random.uniform(-1.0, 1.0),
+                    'max_tilt': random.uniform(-45, 45), 'scale_mod': random.uniform(0.2, 0.5),
                     'rot': 0.0, 'scale': 1.0, 'arc_sin': 0.0
                 })
-        self.shuffle_tiles_data.sort(key=lambda d: (d['tile']['pos'][2], d['tile']['pos'][1], d['tile']['pos'][0]))
+        # Initial sort by starting positions to ensure smooth departure
+        self.shuffle_tiles_data.sort(key=lambda d: d['start_z'])
 
     def update_shuffle_animation(self):
         if self.shuffle_anim_state == 'fading_out':
@@ -687,9 +689,15 @@ class MahjongGame:
                 d['current_pos'][0] = max(0, min(self.width - self.tw, d['current_pos'][0]))
                 d['current_pos'][1] = max(0, min(self.height - self.th, d['current_pos'][1]))
                 
+                # Dynamic Z-sorting during flight to prevent the end-of-animation "clic"
+                d['current_z'] = d['start_z'] + (d['end_z'] - d['start_z']) * tile_prog
+
                 # Organic tilt and scale
                 d['rot'] = arc_sin * d['max_tilt']
                 d['scale'] = 1.0 + arc_sin * d.get('scale_mod', 0.4)
+            
+            # Re-sort tiles by current interpolated Z to ensure smooth overlap transitions
+            self.shuffle_tiles_data.sort(key=lambda d: d['current_z'])
                 
             if all_finished and total_prog >= 1.0:
                 self.shuffle_anim_state = 'settling'
@@ -992,34 +1000,34 @@ class MahjongGame:
         timer_str = f"{el//60:02}:{el%60:02}"
         if self.is_paused: timer_str += " (PAUSE)"
         
-        stats_w, stats_h = 240, 65
+        stats_w, stats_h = 180, 65
         self.draw_cartridge(self.screen, pygame.Rect(20, 20, stats_w, stats_h))
         
-        # Labels & Values
-        self.screen.blit(f_sub.render("TEMPS", True, (180, 180, 180)), (35, 30))
-        self.screen.blit(f_val.render(timer_str, True, (255, 255, 255)), (stats_w - 100, 26))
+        # Labels & Values: Compact alignment
+        self.screen.blit(f_sub.render("TEMPS", True, (180, 180, 180)), (30, 30))
+        self.screen.blit(f_val.render(timer_str, True, (255, 255, 255)), (100, 26))
         
-        self.screen.blit(f_sub.render("SCORE", True, (180, 180, 180)), (35, 55))
-        self.screen.blit(f_val.render(str(self.displayed_score), True, (255, 215, 0)), (stats_w - 100, 51))
+        self.screen.blit(f_sub.render("SCORE", True, (180, 180, 180)), (30, 55))
+        self.screen.blit(f_val.render(str(self.displayed_score), True, (255, 215, 0)), (100, 51))
 
         # --- TOP RIGHT: TILE STATS (Remaining, Combinations, Shuffles) ---
         rem = len(self.layout) + len(self.animating_tiles)
         poss = self.count_moves()
         
-        tr_w, tr_h = 220, 65
+        tr_w, tr_h = 240, 65
         if self.shuffle_count > 0: tr_h += 25
         self.draw_cartridge(self.screen, pygame.Rect(self.width - tr_w - 20, 20, tr_w, tr_h))
         
         self.screen.blit(f_sub.render("TUILES RESTANTES", True, (180, 180, 180)), (self.width - tr_w - 5, 30))
-        self.screen.blit(f_val.render(str(rem), True, (255, 255, 255)), (self.width - 60, 26))
+        self.screen.blit(f_val.render(str(rem), True, (255, 255, 255)), (self.width - 78, 26))
         
         poss_color = (150, 255, 150) if (poss > 0 or not self.layout) else (255, 100, 100)
         self.screen.blit(f_sub.render("COMBINAISONS", True, (180, 180, 180)), (self.width - tr_w - 5, 55))
-        self.screen.blit(f_val.render(str(poss), True, poss_color), (self.width - 60, 51))
+        self.screen.blit(f_val.render(str(poss), True, poss_color), (self.width - 78, 51))
         
         if self.shuffle_count > 0:
             self.screen.blit(f_sub.render("MÉLANGES", True, (180, 180, 180)), (self.width - tr_w - 5, 80))
-            self.screen.blit(f_val.render(str(self.shuffle_count), True, (255, 140, 0)), (self.width - 60, 76))
+            self.screen.blit(f_val.render(str(self.shuffle_count), True, (255, 140, 0)), (self.width - 78, 76))
 
         # --- TOP CENTER: LEVEL NAME ---
         level_display_name = self.current_layout_name
@@ -1030,7 +1038,7 @@ class MahjongGame:
             if best_sh is not None: level_display_name += f" ({best_sh})"
             
         ln_surf = f_ui.render(level_display_name, True, (255, 255, 255))
-        ln_w = ln_surf.get_width() + 60
+        ln_w = ln_surf.get_width() + 40
         self.draw_cartridge(self.screen, pygame.Rect(self.width//2 - ln_w//2, 20, ln_w, 40), color=(0, 0, 0, 180))
         self.screen.blit(ln_surf, (self.width//2 - ln_surf.get_width()//2, 28))
 
@@ -1044,12 +1052,18 @@ class MahjongGame:
 
         if self.victory_tiles:
             for t in self.victory_tiles:
-                img = self.std_tile_variants[t['image_index']]; scale = t.get('scale', 1.0)
+                # Use the 3D variant for consistency with shuffle animation
+                img = self.tile_variants[t['image_index']].get('3d', self.tile_variants[t['image_index']]['filtered'])
+                scale = t.get('scale', 1.0)
                 if scale != 1.0:
-                    tw, th = int(self.std_tw * scale), int(self.std_th * scale)
+                    tw, th = int(img.get_width() * scale), int(img.get_height() * scale)
                     if tw > 0 and th > 0: img = pygame.transform.smoothscale(img, (tw, th))
                 if abs(t['rot']) > 0.1: img = pygame.transform.rotate(img, t['rot'])
-                rect = img.get_rect(center=(int(t['pos'][0] + (self.std_tw*scale)//2), int(t['pos'][1] + (self.std_th*scale)//2))); self.screen.blit(img, rect)
+                
+                # Center around the tile face including depth offset
+                rect = img.get_rect(center=(int(t['pos'][0] + (self.tw + self.depth_off) * scale // 2), 
+                                            int(t['pos'][1] + (self.th + self.depth_off) * scale // 2)))
+                self.screen.blit(img, rect)
 
         if self.win_ui_progress > 0:
             ov = pygame.Surface((self.width,self.height), pygame.SRCALPHA); ov.fill((0,0,0,int(200 * self.win_ui_progress))); self.screen.blit(ov,(0,0))
@@ -1121,9 +1135,19 @@ class MahjongGame:
                 if scale != 1.0:
                     sw, sh = int(img.get_width() * scale), int(img.get_height() * scale)
                     if sw > 0 and sh > 0: img = pygame.transform.smoothscale(img, (sw, sh))
+                
+                # Get size before rotation to keep center stable
+                sw, sh = img.get_size()
                 rot = d.get('rot', 0.0)
                 if abs(rot) > 0.1: img = pygame.transform.rotate(img, rot)
-                rect = img.get_rect(center=(int(x + (self.tw + self.depth_off) / 2.0), int(y + (self.th + self.depth_off) / 2.0)))
+                
+                # Pixel-perfect centering: calculate float center then truncate topleft
+                # This prevents the 1-pixel shift caused by Pygame Rect's integer rounding
+                cx, cy = x + sw / 2.0, y + sh / 2.0
+                rect = img.get_rect()
+                rect.x = int(cx - img.get_width() / 2.0)
+                rect.y = int(cy - img.get_height() / 2.0)
+                
                 self.screen.blit(self.shadow_surf, rect.move(sh_off, sh_off))
                 self.screen.blit(img, rect)
         else:
@@ -1391,9 +1415,7 @@ class MahjongGame:
             if hint:
                 penalty = 500
                 # Add negative flying score
-                f_t = pygame.font.SysFont("Arial", 24, bold=True)
-                target_x = 20 + f_t.size("Score : ")[0] + f_t.size(str(self.displayed_score))[0] // 2
-                target_y = 25 + f_t.get_height() + f_t.get_height() // 2
+                target_x, target_y = self.get_score_target_pos()
                 start_x, start_y = self.hint_btn_rect.center
                 self.flying_scores.append({
                     'pos': [start_x, start_y],
