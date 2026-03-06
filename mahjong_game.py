@@ -99,8 +99,6 @@ class MahjongGame:
         self.options_ui_progress = 0.0
         self.options_ui_state = 'closed'
         self.show_gray_tiles = True
-        self.show_win_count = True
-        self.show_best_shuffles = True
         self.auto_hint = True
         self.music_volume = 0.5
         self.sfx_volume = 0.5
@@ -156,8 +154,6 @@ class MahjongGame:
                     self.music_volume = data.get("music_volume", 0.5)
                     self.sfx_volume = data.get("sfx_volume", 0.5)
                     self.show_gray_tiles = data.get("show_gray_tiles", True)
-                    self.show_win_count = data.get("show_win_count", True)
-                    self.show_best_shuffles = data.get("show_best_shuffles", True)
                     self.auto_hint = data.get("auto_hint", True)
             except: pass
 
@@ -183,8 +179,6 @@ class MahjongGame:
                 "music_volume": self.music_volume,
                 "sfx_volume": self.sfx_volume,
                 "show_gray_tiles": self.show_gray_tiles,
-                "show_win_count": self.show_win_count,
-                "show_best_shuffles": self.show_best_shuffles,
                 "auto_hint": self.auto_hint
             }
             with open(stats_path, "w") as f:
@@ -1039,12 +1033,6 @@ class MahjongGame:
 
         # --- TOP CENTER: LEVEL NAME ---
         level_display_name = self.current_layout_name
-        stats = self.level_stats.get(self.current_layout_name, {})
-        if getattr(self, 'show_win_count', True): level_display_name += f" ({stats.get('times_completed', 0)})"
-        if getattr(self, 'show_best_shuffles', True):
-            best_sh = stats.get("best_shuffles")
-            if best_sh is not None: level_display_name += f" ({best_sh})"
-            
         ln_surf = f_ui.render(level_display_name, True, (255, 255, 255))
         ln_w = ln_surf.get_width() + 40
         self.draw_cartridge(self.screen, pygame.Rect(self.width//2 - ln_w//2, 20, ln_w, 40), color=(0, 0, 0, 180))
@@ -1301,11 +1289,11 @@ class MahjongGame:
         self.screen.blit(scaled_surf, (sx, sy))
 
     def draw_options_ui(self):
-        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA); overlay.fill((0, 0, 0, int(180 * self.options_ui_progress))); self.screen.blit(overlay, (0, 0)); sw, sh, scale = 700, 700, 0.8 + 0.2 * self.options_ui_progress; w, h = int(sw * scale), int(sh * scale); x, y = (self.width - w) // 2, (self.height - h) // 2; panel = pygame.Surface((sw, sh), pygame.SRCALPHA); pygame.draw.rect(panel, (30, 30, 35, 255), (0, 0, sw, sh), border_radius=20)
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA); overlay.fill((0, 0, 0, int(180 * self.options_ui_progress))); self.screen.blit(overlay, (0, 0)); sw, sh, scale = 700, 540, 0.8 + 0.2 * self.options_ui_progress; w, h = int(sw * scale), int(sh * scale); x, y = (self.width - w) // 2, (self.height - h) // 2; panel = pygame.Surface((sw, sh), pygame.SRCALPHA); pygame.draw.rect(panel, (30, 30, 35, 255), (0, 0, sw, sh), border_radius=20)
         # Gold border
         pygame.draw.rect(panel, (218, 165, 32, 255), (0, 0, sw, sh), 4, border_radius=20)
         f_title, f_msg = pygame.font.SysFont("Arial", 32, True), pygame.font.SysFont("Arial", 22); title_surf = f_title.render("Options", True, (255, 255, 255)); panel.blit(title_surf, title_surf.get_rect(centerx=sw//2, y=30)); m_pos = pygame.mouse.get_pos(); adj_m_pos = ((m_pos[0] - x) / scale, (m_pos[1] - y) / scale); start_y, spacing = 110, 80
-        opt_configs = [("Ombrage des tuiles bloquées :", 'show_gray_tiles', 'toggle_gray_rect'), ("Afficher le nombre de victoires :", 'show_win_count', 'toggle_wins_rect'), ("Afficher le nombre de mélanges min :", 'show_best_shuffles', 'toggle_best_sh_rect'), ("Indice automatique :", 'auto_hint', 'toggle_hint_rect')]
+        opt_configs = [("Ombrage des tuiles bloquées :", 'show_gray_tiles', 'toggle_gray_rect'), ("Indice automatique :", 'auto_hint', 'toggle_hint_rect')]
         for i, (txt, attr, rect_name) in enumerate(opt_configs):
             oy = start_y + i * spacing; label = f_msg.render(txt, True, (220, 220, 220)); panel.blit(label, (50, oy)); rect = pygame.Rect(sw - 130, oy - 5, 80, 34); setattr(self, rect_name, rect); val = getattr(self, attr); t_color = (46, 139, 87) if val else (100, 100, 110)
             if rect.collidepoint(adj_m_pos): t_color = tuple(min(255, c + 20) for c in t_color)
@@ -1325,12 +1313,10 @@ class MahjongGame:
                 if b['rect'].collidepoint(pos): self.play_click_sfx(); self.win_pressed_btn = b['id']; return
             return
         if self.options_ui_state == 'open':
-            for r in ['toggle_gray_rect_global', 'toggle_wins_rect_global', 'toggle_best_sh_rect_global', 'toggle_hint_rect_global']:
+            for r in ['toggle_gray_rect_global', 'toggle_hint_rect_global']:
                 if hasattr(self, r) and getattr(self, r).collidepoint(pos):
                     self.play_click_sfx()
                     if 'gray' in r: self.show_gray_tiles = not self.show_gray_tiles; self.update_sorted_layout()
-                    elif 'wins' in r: self.show_win_count = not self.show_win_count
-                    elif 'best_sh' in r: self.show_best_shuffles = not self.show_best_shuffles
                     elif 'hint' in r: self.auto_hint = not self.auto_hint
                     return
             if hasattr(self, 'music_slider_rect_global') and self.music_slider_rect_global.inflate(20, 40).collidepoint(pos): self.play_click_sfx(); self.music_dragging_slider = True; return
