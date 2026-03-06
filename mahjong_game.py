@@ -65,6 +65,7 @@ class MahjongGame:
         self.win_pressed_btn = None
         self.next_level_to_load = None
         self.open_stats_after_win = False
+        self.victory_window_dismissed = False
         self.layout, self.sorted_layout = [], []
         self.flying_scores = []
         
@@ -86,6 +87,8 @@ class MahjongGame:
         self.stats_ui_state = 'closed'
         self.stats_scroll_y = 0
         self.pending_level_idx = None
+        self.pressed_stat_row = None
+        self.row_click_time = 0
         self.level_stats = {}
         self.level_previews = {}
         self.stats_sort_col = None
@@ -655,10 +658,7 @@ class MahjongGame:
     def update_shuffle_animation(self):
         if self.shuffle_anim_state == 'fading_out':
             if all(t.get('gray_alpha', 0) == 0 for t in self.layout):
-                if not hasattr(self, 'shuffle_pre_move_timer'): self.shuffle_pre_move_timer = pygame.time.get_ticks()
-                if pygame.time.get_ticks() - self.shuffle_pre_move_timer > 300: # Short pause for breathing room
-                    delattr(self, 'shuffle_pre_move_timer')
-                    self._execute_shuffle_logic()
+                self._execute_shuffle_logic()
         elif self.shuffle_anim_state == 'moving':
             total_prog = (pygame.time.get_ticks() - self.shuffle_start_time) / self.shuffle_duration
             all_finished = True
@@ -700,13 +700,12 @@ class MahjongGame:
             self.shuffle_tiles_data.sort(key=lambda d: d['current_z'])
                 
             if all_finished and total_prog >= 1.0:
-                self.shuffle_anim_state = 'settling'
-                self.shuffle_settling_start = pygame.time.get_ticks()
-        elif self.shuffle_anim_state == 'settling':
-            if pygame.time.get_ticks() - self.shuffle_settling_start > 500:
                 self.shuffle_anim_state, self.shuffle_tiles_data = 'idle', []
                 self.last_match_time = pygame.time.get_ticks()
                 self.last_move_time = self.last_match_time
+        elif self.shuffle_anim_state == 'settling':
+            # This state is now skipped for immediate transition
+            self.shuffle_anim_state, self.shuffle_tiles_data = 'idle', []
 
     def update_level_animations(self):
         if self.level_anim_state == 'in':
@@ -723,7 +722,8 @@ class MahjongGame:
             if self.victory_anim_state == 'idle':
                 self.victory_anim_state = 'active'; self.victory_anim_start_time = pygame.time.get_ticks(); self.init_victory_animation()
             elif self.victory_anim_state == 'active':
-                if self.win_ui_state == 'closed' and pygame.time.get_ticks() - self.victory_anim_start_time > 3000:
+                # Only auto-open if no other UI is trying to show up
+                if self.win_ui_state == 'closed' and self.stats_ui_state == 'closed' and self.options_ui_state == 'closed' and pygame.time.get_ticks() - self.victory_anim_start_time > 3000:
                     self.finalize_victory(); self.win_ui_state, self.win_ui_progress = 'opening', 0.0
                 if pygame.time.get_ticks() - self.victory_anim_start_time > 20000: self.victory_anim_state = 'draining'
         if self.win_ui_state == 'opening':
@@ -755,6 +755,10 @@ class MahjongGame:
                     self.start_shuffle_animation(sp.center if sp else None)
                     self.shuffle_confirmed = False
                 else: self.shuffle_needed = False
+        if self.stats_ui_state == 'open' and self.row_click_time > 0:
+            if pygame.time.get_ticks() - self.row_click_time > 300:
+                self.row_click_time = 0; self.pressed_stat_row = None; self.stats_ui_state = 'closing'
+                self.victory_anim_state = 'draining' # Start clearing the screen now
         if self.stats_ui_state == 'opening':
             self.stats_ui_progress = min(1.0, self.stats_ui_progress + 0.08)
             if self.stats_ui_progress >= 1.0: self.stats_ui_state = 'open'
@@ -779,8 +783,12 @@ class MahjongGame:
     def update_animations(self):
         self.update_level_animations(); self.update_ui_animations()
         if self.bg_transition_progress < 1.0: self.bg_transition_progress = min(1.0, self.bg_transition_progress + 0.02)
+        
+        # Victory animation should continue even when paused (stats/options open)
+        self.update_victory_animation()
+        
         if self.is_paused: return
-        self.update_shuffle_animation(); self.update_history_animations(); self.update_victory_animation()
+        self.update_shuffle_animation(); self.update_history_animations()
         remaining_scores = []
         for s in self.flying_scores:
             s['progress'] += 0.01
@@ -811,8 +819,8 @@ class MahjongGame:
         if self.shuffle_anim_state in ('idle', 'fading_out'):
             for t in self.layout:
                 ta = t.get('target_gray_alpha', 0.0); ca = t.get('gray_alpha', ta)
-                if ca < ta: t['gray_alpha'] = min(ta, ca + 4.0)
-                elif ca > ta: t['gray_alpha'] = max(ta, ca - 4.0)
+                if ca < ta: t['gray_alpha'] = min(ta, ca + 8.0)
+                elif ca > ta: t['gray_alpha'] = max(ta, ca - 8.0)
         fin = []
         for a in self.animating_tiles:
             dx, dy = a['target'][0]-a['pos'][0], a['target'][1]-a['pos'][1]; dist = (dx**2+dy**2)**0.5
@@ -953,7 +961,7 @@ class MahjongGame:
             if not (is_draining and off): new_tiles.append(t)
         self.victory_tiles = new_tiles
         if is_draining and len(self.victory_tiles) < 3:
-            self.victory_tiles, self.victory_anim_state = [], 'idle'
+            self.victory_tiles, self.victory_anim_state = [], 'completed'
             if self.queued_debug_anim is not None:
                 self.victory_anim_idx = self.queued_debug_anim; self.queued_debug_anim = None
                 self.victory_anim_state, self.victory_anim_start_time = 'active', pygame.time.get_ticks(); self.init_victory_animation()
@@ -1256,27 +1264,34 @@ class MahjongGame:
             if final_h > 0:
                 self.stats_rows_rects.append({'rect': pygame.Rect(ix, final_y, iw, final_h), 'level_index': i})
 
+            # Check if this row is currently pressed
+            is_pressed = (self.pressed_stat_row == i)
+            row_content_off = 3 if is_pressed else 0
+            if is_pressed:
+                # Draw a "pressed" background overlay
+                pygame.draw.rect(rows_view, (20, 20, 25, 255), (0, ry, clip_rect.width, row_h))
+
             # Add row separator
             pygame.draw.line(rows_view, (60, 60, 70), (0, ry + row_h), (clip_rect.width, ry + row_h), 1)
 
             if preview:
-                rows_view.blit(preview, (0, ry))
+                rows_view.blit(preview, (0, ry + row_content_off))
             
             # Restore level name
-            rows_view.blit(f_row.render(name, True, (220, 220, 220)), (140, ry + 30))
+            rows_view.blit(f_row.render(name, True, (220, 220, 220)), (140, ry + 30 + row_content_off))
             s = self.level_stats.get(name)
             if s:
                 bt = s.get("best_time")
                 time_str = f"{(bt//1000)//60:02}:{(bt//1000)%60:02}" if bt and 0 < bt < 999999999 else "--:--"
-                t_surf = f_row.render(time_str, True, (0, 255, 127)); rows_view.blit(t_surf, (340 + (80 - t_surf.get_width()) // 2, ry + 30))
-                bs_surf = f_row.render(str(s.get("best_shuffles", 0)), True, (255, 165, 0)); rows_view.blit(bs_surf, (440 + (70 - bs_surf.get_width()) // 2, ry + 30))
-                tc_surf = f_row.render(str(s.get("times_completed", 0)), True, (100, 200, 255)); rows_view.blit(tc_surf, (530 + (90 - tc_surf.get_width()) // 2, ry + 30))
-                sc_surf = f_row.render(str(s.get("best_score") or 0), True, (255, 215, 0)); rows_view.blit(sc_surf, (630 + (100 - sc_surf.get_width()) // 2, ry + 30))
+                t_surf = f_row.render(time_str, True, (0, 255, 127)); rows_view.blit(t_surf, (340 + (80 - t_surf.get_width()) // 2, ry + 30 + row_content_off))
+                bs_surf = f_row.render(str(s.get("best_shuffles", 0)), True, (255, 165, 0)); rows_view.blit(bs_surf, (440 + (70 - bs_surf.get_width()) // 2, ry + 30 + row_content_off))
+                tc_surf = f_row.render(str(s.get("times_completed", 0)), True, (100, 200, 255)); rows_view.blit(tc_surf, (530 + (90 - tc_surf.get_width()) // 2, ry + 30 + row_content_off))
+                sc_surf = f_row.render(str(s.get("best_score") or 0), True, (255, 215, 0)); rows_view.blit(sc_surf, (630 + (100 - sc_surf.get_width()) // 2, ry + 30 + row_content_off))
             else:
-                t_surf = f_row.render("--:--", True, (100, 100, 100)); rows_view.blit(t_surf, (340 + (80 - t_surf.get_width()) // 2, ry + 30))
-                bs_surf = f_row.render("-", True, (100, 100, 100)); rows_view.blit(bs_surf, (440 + (70 - bs_surf.get_width()) // 2, ry + 30))
-                tc_surf = f_row.render("0", True, (100, 100, 100)); rows_view.blit(tc_surf, (530 + (90 - tc_surf.get_width()) // 2, ry + 30))
-                sc_surf = f_row.render("0", True, (100, 100, 100)); rows_view.blit(sc_surf, (630 + (100 - sc_surf.get_width()) // 2, ry + 30))
+                t_surf = f_row.render("--:--", True, (100, 100, 100)); rows_view.blit(t_surf, (340 + (80 - t_surf.get_width()) // 2, ry + 30 + row_content_off))
+                bs_surf = f_row.render("-", True, (100, 100, 100)); rows_view.blit(bs_surf, (440 + (70 - bs_surf.get_width()) // 2, ry + 30 + row_content_off))
+                tc_surf = f_row.render("0", True, (100, 100, 100)); rows_view.blit(tc_surf, (530 + (90 - tc_surf.get_width()) // 2, ry + 30 + row_content_off))
+                sc_surf = f_row.render("0", True, (100, 100, 100)); rows_view.blit(sc_surf, (630 + (100 - sc_surf.get_width()) // 2, ry + 30 + row_content_off))
         stats_surf.blit(rows_view, clip_rect.topleft)
         if content_h > clip_rect.height:
             pygame.draw.rect(stats_surf, (50, 50, 60), (sw - 37, clip_rect.y, 12, clip_rect.height), border_radius=6); sb_h = max(30, int(clip_rect.height * (clip_rect.height / content_h))); sb_y = clip_rect.y + int((self.stats_scroll_y / (content_h - clip_rect.height)) * (clip_rect.height - sb_h)); pygame.draw.rect(stats_surf, (120, 120, 140), (sw - 37, sb_y, 12, sb_h), border_radius=6); self.stats_scrollbar_rect_global = pygame.Rect(sx + (sw - 45) * scale, sy + clip_rect.y * scale, 30 * scale, clip_rect.height * scale)
@@ -1329,7 +1344,10 @@ class MahjongGame:
                     if h['rect'].collidepoint(pos): self.play_click_sfx(); self.sort_stats(h['column']); return
             if hasattr(self, 'stats_rows_rects'):
                 for row in self.stats_rows_rects:
-                    if row['rect'].collidepoint(pos): self.play_click_sfx(); self.pending_level_idx, self.stats_ui_state = row['level_index'], 'closing'; return
+                    if row['rect'].collidepoint(pos): 
+                        self.play_click_sfx()
+                        self.pressed_stat_row = row['level_index']
+                        return
             if hasattr(self, 'stats_close_btn_global') and self.stats_close_btn_global.collidepoint(pos): self.play_click_sfx(); self.pressed_button = "stats_close"; return
             return
         if self.show_history and self.history_anim_state == 'idle':
@@ -1379,19 +1397,43 @@ class MahjongGame:
 
     def handle_release(self, pos):
         self.stats_dragging_scrollbar = False; self.music_dragging_slider = False; self.sfx_dragging_slider = False
+        
+        # 1. Handle statistics row interaction first
+        if self.pressed_stat_row is not None:
+            row_idx = self.pressed_stat_row
+            released_on_row = False
+            if hasattr(self, 'stats_rows_rects'):
+                for row in self.stats_rows_rects:
+                    if row['level_index'] == row_idx and row['rect'].collidepoint(pos):
+                        released_on_row = True; break
+            if released_on_row:
+                self.pending_level_idx = row_idx
+                self.row_click_time = pygame.time.get_ticks()
+                return # Keep row_idx in pressed_stat_row for visual effect
+            else:
+                self.pressed_stat_row = None
+                return
+
+        # 2. Handle victory UI buttons
         if not self.pressed_button:
             if self.win_pressed_btn:
                 btn_id = self.win_pressed_btn; self.win_pressed_btn = None
                 if hasattr(self, 'win_btn_rects'):
                     for b in self.win_btn_rects:
                         if b['id'] == btn_id and b['rect'].collidepoint(pos):
-                            if btn_id == 'random': self.next_level_to_load = None
-                            elif btn_id == 'choose': self.open_stats_after_win = True
-                            self.win_ui_state, self.victory_anim_state, self.drain_start_time = 'closing', 'draining', pygame.time.get_ticks(); return
+                            if btn_id == 'random': 
+                                self.next_level_to_load = None
+                                self.victory_anim_state = 'draining'
+                            elif btn_id == 'choose': 
+                                self.open_stats_after_win = True
+                            self.win_ui_state, self.drain_start_time = 'closing', pygame.time.get_ticks(); return
             return
+
+        # 3. Handle standard buttons
         pb = self.pressed_button; self.pressed_button = None
         if pb == "options_close" and hasattr(self, 'options_close_btn_global') and self.options_close_btn_global.collidepoint(pos): self.options_ui_state = 'closing'
         elif pb == "stats_close" and hasattr(self, 'stats_close_btn_global') and self.stats_close_btn_global.collidepoint(pos): self.pending_level_idx, self.stats_ui_state = None, 'closing'
+        
         elif pb == "shuffle_confirm" and hasattr(self, 'shuffle_confirm_btn') and self.shuffle_confirm_btn.collidepoint(pos): self.shuffle_confirmed, self.shuffle_ui_state = True, 'closing'
         elif pb == "shuffle_cancel" and hasattr(self, 'shuffle_cancel_btn') and self.shuffle_cancel_btn.collidepoint(pos): self.shuffle_confirmed, self.shuffle_ui_state = False, 'closing'
         elif pb == "stats" and hasattr(self, 'stats_btn_rect') and self.stats_btn_rect.collidepoint(pos):
