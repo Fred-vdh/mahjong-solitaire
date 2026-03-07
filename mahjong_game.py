@@ -83,6 +83,7 @@ class MahjongGame:
         self.shuffle_ui_state = 'closed'
         self.shuffle_confirmed = False
         self.shuffle_start_time = 0
+        self.shuffle_post_close_time = 0
         self.shuffle_duration = 800
         
         self.stats_ui_progress = 0.0
@@ -668,6 +669,10 @@ class MahjongGame:
         elif self.shuffle_ui_state == 'closing':
             self.shuffle_ui_progress = max(0.0, self.shuffle_ui_progress - 0.08)
             if self.shuffle_ui_progress <= 0.0:
+                self.shuffle_ui_state = 'post_closing_wait'
+                self.shuffle_post_close_time = pygame.time.get_ticks()
+        elif self.shuffle_ui_state == 'post_closing_wait':
+            if pygame.time.get_ticks() - self.shuffle_post_close_time > 500:
                 self.shuffle_ui_state = 'closed'
                 if not self.is_paused: paused_duration = pygame.time.get_ticks() - self.pause_start_ticks; self.adjust_times_after_pause(paused_duration)
                 if self.shuffle_confirmed: sp = getattr(self, 'shuffle_confirm_btn', None); self.start_shuffle_animation(sp.center if sp else None); self.shuffle_confirmed = False
@@ -847,6 +852,7 @@ class MahjongGame:
 
     def reset_game(self, l_id=None):
         self.won, self.lost = False, False
+        if self.final_time is None: self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
         if not self.layout and not self.animating_tiles and not self.matched_tiles and not self.victory_tiles: self.init_game(l_id); self.next_layout_id, self.level_anim_state, self.level_anim_progress = None, 'in', 0.0
         else: self.next_layout_id, self.level_anim_state, self.level_anim_progress = l_id, 'out', 1.0
 

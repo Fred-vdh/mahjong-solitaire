@@ -1,40 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-block_cipher = None
-
-added_files = [
-    ('Images', 'Images'),
-    ('Levels', 'Levels'),
-    ('Musiques', 'Musiques'),
-    ('effets', 'effets'),
-    ('799px-Mahjong_eg_Shanghai.webp', '.')
-]
 
 a = Analysis(
     ['mahjong_game.py'],
     pathex=[],
     binaries=[],
-    datas=added_files,
-    hiddenimports=['numpy', 'PIL', 'pygame'],
+    datas=[('799px-Mahjong_eg_Shanghai.webp', '.'), ('Images', 'Images'), ('Levels', 'Levels'), ('Musiques', 'Musiques'), ('effets', 'effets')],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
+    optimize=0,
 )
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
-    a.zipfiles,
     a.datas,
     [],
-    name='MahjongSolitaire',
+    name='mahjong_game',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
