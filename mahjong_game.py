@@ -82,6 +82,7 @@ class MahjongGame:
         self.shuffle_ui_progress = 0.0
         self.shuffle_ui_state = 'closed'
         self.shuffle_confirmed = False
+        self.shuffle_refused = False
         self.shuffle_start_time = 0
         self.shuffle_post_close_time = 0
         self.shuffle_duration = 800
@@ -320,8 +321,8 @@ class MahjongGame:
         f_ui = pygame.font.SysFont("Arial", 24, bold=True)
         text_h = f_ui.get_height()
         margin_x = self.width * 0.05
-        top_margin = 60 + text_h
-        bottom_margin = 110
+        top_margin = 100 + text_h
+        bottom_margin = 160
         available_w = self.width - 2 * margin_x
         available_h = self.height - top_margin - bottom_margin
         std_unit_w = (available_w / GRID_W) * 1.5; std_unit_h = (available_h / GRID_H) * 1.5
@@ -400,9 +401,10 @@ class MahjongGame:
         self.current_l_id = l_id; lname = self.layout_names[l_id]
         if lname in self.recent_levels: self.recent_levels.remove(lname)
         self.recent_levels.append(lname)
-        if len(self.recent_levels) > 20: self.recent_levels.pop(0)
+        if len(self.recent_levels) > 50: self.recent_levels.pop(0)
         self.save_stats(); self.animating_tiles, self.matched_tiles, self.undo_animating_tiles = [], [], []
         self.show_history, self.history_anim_state = False, 'idle'; self.is_manual_paused, self.is_paused_by_focus, self.pause_start_ticks = False, False, 0
+        self.shuffle_refused = False
         self.current_layout_name = self.layout_names[l_id]
         if self.bg_images:
             if self.current_bg:
@@ -599,7 +601,7 @@ class MahjongGame:
         self.flying_scores.append({'pos': [sp[0], sp[1]], 'target': (target_x, target_y), 'text': f"-{penalty}", 'score_value': -penalty, 'progress': 0.0})
 
     def _execute_shuffle_logic(self):
-        self.matched_tiles = []; self.shuffle_count += 1; self.total_shuffles += 1; self.shuffle_anim_state = 'moving'
+        self.matched_tiles = []; self.shuffle_count += 1; self.total_shuffles += 1; self.shuffle_anim_state = 'moving'; self.selected = None
         old_data = [{'type': t['type'], 'pos': t['pos']} for t in self.layout]; current_types = [t['type'] for t in self.layout]; self.make_solvable(types_pool=current_types); self.update_sorted_layout(); self.shuffle_tiles_data = []
         mx, my = self.board_offset_x, self.board_offset_y; used_old = [False] * len(old_data); self.shuffle_duration = 1200; self.shuffle_start_time = pygame.time.get_ticks()
         for t in self.layout:
@@ -633,7 +635,8 @@ class MahjongGame:
             self.shuffle_tiles_data.sort(key=lambda d: d['current_z'])
             if all_finished and total_prog >= 1.0:
                 self.shuffle_anim_state, self.shuffle_tiles_data = 'idle', []; self.last_match_time = pygame.time.get_ticks(); self.last_move_time = self.last_match_time
-        elif self.shuffle_anim_state == 'settling': self.shuffle_anim_state, self.shuffle_tiles_data = 'idle', []
+                self.shuffle_refused = False
+        elif self.shuffle_anim_state == 'settling': self.shuffle_anim_state, self.shuffle_tiles_data = 'idle', []; self.shuffle_refused = False
 
     def update_level_animations(self):
         if self.level_anim_state == 'in':
@@ -676,7 +679,7 @@ class MahjongGame:
                 self.shuffle_ui_state = 'closed'
                 if not self.is_paused: paused_duration = pygame.time.get_ticks() - self.pause_start_ticks; self.adjust_times_after_pause(paused_duration)
                 if self.shuffle_confirmed: sp = getattr(self, 'shuffle_confirm_btn', None); self.start_shuffle_animation(sp.center if sp else None); self.shuffle_confirmed = False
-                else: self.shuffle_needed = False
+                else: self.shuffle_needed = False; self.shuffle_refused = True
         if self.stats_ui_state == 'open' and self.row_click_time > 0:
             if pygame.time.get_ticks() - self.row_click_time > 300: self.row_click_time = 0; self.pressed_stat_row = None; self.stats_ui_state = 'closing'; self.victory_anim_state = 'draining'
         if self.stats_ui_state == 'opening':
@@ -735,7 +738,7 @@ class MahjongGame:
             elif not self.has_moves():
                 if self.check_loss_condition():
                     self.lost = True; self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks); self.show_history = False; self.win_ui_state, self.win_ui_progress = 'opening', 0.0
-                elif not self.shuffle_needed and self.shuffle_anim_state == 'idle':
+                elif not self.shuffle_needed and self.shuffle_anim_state == 'idle' and not getattr(self, 'shuffle_refused', False):
                     self.shuffle_needed = True
 
     def update_history_animations(self):
@@ -895,11 +898,11 @@ class MahjongGame:
                 if self.selected==t: pygame.draw.rect(self.screen,(255,255,0),t['rect'],6,5)
                 elif self.hint_pair and t in self.hint_pair: alp = int(128+127*np.sin(pygame.time.get_ticks()*0.01)); s=pygame.Surface((self.tw,self.th),pygame.SRCALPHA); pygame.draw.rect(s,(0,191,255,alp),s.get_rect(),8,5); self.screen.blit(s,(x,y))
         f_ui, f_val, f_sub = pygame.font.SysFont("Arial", 20, bold=True), pygame.font.SysFont("Arial", 22, bold=True), pygame.font.SysFont("Arial", 16, bold=True)
-        if self.won or self.win_ui_state != 'closed' or self.level_anim_state != 'idle': el = 0
+        if self.final_time is not None: el = self.final_time // 1000
+        elif self.level_anim_state != 'idle': el = 0
         elif self.is_paused: el = max(0, (self.pause_start_ticks - self.start_ticks) // 1000)
         else: el = max(0, (pygame.time.get_ticks() - self.start_ticks) // 1000)
         timer_str = f"{el//60:02}:{el%60:02}"
-        if self.is_paused: timer_str += " (PAUSE)"
         self.draw_cartridge(self.screen, pygame.Rect(20, 20, 180, 65)); self.screen.blit(f_sub.render("TEMPS", True, (180, 180, 180)), (30, 30)); self.screen.blit(f_val.render(timer_str, True, (255, 255, 255)), (100, 26)); self.screen.blit(f_sub.render("SCORE", True, (180, 180, 180)), (30, 55)); self.screen.blit(f_val.render(str(self.displayed_score), True, (255, 215, 0)), (100, 51))
         rem = len(self.layout) + len(self.animating_tiles); poss = self.count_moves(); tr_w, tr_h = 240, 65
         if self.shuffle_count > 0: tr_h += 25
@@ -1085,7 +1088,7 @@ class MahjongGame:
                     if it['rect'].collidepoint(pos):
                         self.play_click_sfx(); tr = self.matched_tiles[it['index']:]; rd = [{'tile':tr[0],'start_pos':it['p1']},{'tile':tr[1],'start_pos':it['p2']}]
                         for i in range(2,len(tr)): rd.append({'tile':tr[i],'start_pos':(self.width-100,self.height-100)})
-                        self.matched_tiles = self.matched_tiles[:it['index']]; self.start_undo_animation(rd); self.show_history, self.history_anim_state, self.history_anim_progress = False, 'idle', 0.0; return
+                        self.matched_tiles = self.matched_tiles[:it['index']]; self.start_undo_animation(rd); self.show_history, self.history_anim_state, self.history_anim_progress = False, 'idle', 0.0; self.shuffle_refused = False; return
             self.play_click_sfx(); self.history_anim_state = 'closing'; return
         pw, ph = self.tw * 2 + 15, self.th + 10; pile_area = pygame.Rect(self.width - pw - 25, self.height - ph - 15, pw, ph)
         if pile_area.collidepoint(pos) and self.matched_tiles and not self.animating_tiles: self.play_click_sfx(); self.show_history, self.history_anim_state = True, 'opening'; return
@@ -1112,6 +1115,7 @@ class MahjongGame:
                 if self.selected:
                     if self.selected == t: self.selected = None
                     elif self.are_compatible(self.selected['type'], t['type']):
+                        self.shuffle_refused = False
                         now = pygame.time.get_ticks(); diff = (now - self.last_match_time) / 1000.0; base_points = 1000 if diff <= 4.0 else int(1000 - (diff - 4.0) * 90) if diff <= 14.0 else 100
                         move_score = int(base_points * self.score_scaling); self.last_match_time = now
                         if t['rect']: sx, sy = t['rect'].center; tx, ty = self.get_score_target_pos(); self.flying_scores.append({'pos': [sx, sy], 'target': (tx, ty), 'text': f"+{move_score}", 'score_value': move_score, 'progress': 0.0})
