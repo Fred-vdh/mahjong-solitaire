@@ -5,7 +5,7 @@ a = Analysis(
     ['mahjong_game.py'],
     pathex=[],
     binaries=[],
-    datas=[('799px-Mahjong_eg_Shanghai.webp', '.'), ('Images', 'Images'), ('Levels', 'Levels'), ('Musiques', 'Musiques'), ('effets', 'effets')],
+    datas=[('Images', 'Images'), ('Levels', 'Levels'), ('Musiques', 'Musiques'), ('effets', 'effets'), ('799px-Mahjong_eg_Shanghai.webp', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
