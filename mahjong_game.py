@@ -446,18 +446,14 @@ class MahjongGame:
         self.last_win_stats = {"prev_best_time": stats.get("best_time"), "prev_best_shuffles": stats.get("best_shuffles"), "prev_best_hints": stats.get("best_hints"), "prev_best_score": stats.get("best_score"), "is_new_time_record": False, "is_new_shuffles_record": False, "is_new_hints_record": False, "is_new_score_record": False}
         if lname not in self.level_stats:
             self.level_stats[lname] = {"best_time": self.final_time, "best_shuffles": self.shuffle_count, "best_hints": self.hint_count, "times_completed": 1, "total_time": self.final_time, "best_score": self.current_score}
-            self.last_win_stats.update({"is_new_time_record": False, "is_new_shuffles_record": False, "is_new_hints_record": False, "is_new_score_record": False})
+            self.last_win_stats.update({"is_new_time_record": True, "is_new_shuffles_record": True, "is_new_hints_record": True, "is_new_score_record": True})
         else:
-            old_bt = self.level_stats[lname].get("best_time", 999999999)
-            if self.final_time < old_bt: self.level_stats[lname]["best_time"] = self.final_time; self.last_win_stats["is_new_time_record"] = True
-            old_bs = self.level_stats[lname].get("best_shuffles", 999)
-            if self.shuffle_count < old_bs: self.level_stats[lname]["best_shuffles"] = self.shuffle_count; self.last_win_stats["is_new_shuffles_record"] = True
-            old_bh = self.level_stats[lname].get("best_hints", 999)
-            if self.hint_count < old_bh: self.level_stats[lname]["best_hints"] = self.hint_count; self.last_win_stats["is_new_hints_record"] = (old_bh != 999)
-            old_bsc = self.level_stats[lname].get("best_score", 0)
-            if self.current_score > old_bsc: self.level_stats[lname]["best_score"] = self.current_score; self.last_win_stats["is_new_score_record"] = True
-            self.level_stats[lname]["times_completed"] += 1
-            self.level_stats[lname]["total_time"] = self.level_stats[lname].get("total_time", 0) + self.final_time
+            s = self.level_stats[lname]
+            if s.get("best_time") is None or self.final_time < s["best_time"]: s["best_time"] = self.final_time; self.last_win_stats["is_new_time_record"] = True
+            if s.get("best_shuffles") is None or self.shuffle_count < s["best_shuffles"]: s["best_shuffles"] = self.shuffle_count; self.last_win_stats["is_new_shuffles_record"] = True
+            if s.get("best_hints") is None or self.hint_count < s["best_hints"]: s["best_hints"] = self.hint_count; self.last_win_stats["is_new_hints_record"] = True
+            if s.get("best_score") is None or self.current_score > s["best_score"]: s["best_score"] = self.current_score; self.last_win_stats["is_new_score_record"] = True
+            s["times_completed"] += 1; s["total_time"] = s.get("total_time", 0) + self.final_time
         self.save_stats()
 
     def update_sorted_layout(self):
@@ -710,12 +706,12 @@ class MahjongGame:
 
     def update_level_animations(self):
         if self.level_anim_state == 'in':
-            self.level_anim_progress = min(1.0, self.level_anim_progress + 0.01)
+            self.level_anim_progress = min(1.0, self.level_anim_progress + 0.0056)
             if self.level_anim_progress == 1.0: 
                 self.level_anim_state = 'idle'; now = self.pause_start_ticks if self.is_paused else pygame.time.get_ticks(); self.start_ticks, self.last_match_time, self.last_move_time = now, now, now
                 self.level_transition_idx = random.randint(0, 11)
         elif self.level_anim_state == 'out':
-            self.level_anim_progress = max(0.0, self.level_anim_progress - 0.01)
+            self.level_anim_progress = max(0.0, self.level_anim_progress - 0.0056)
             if self.level_anim_progress <= 0.0 and not self.victory_tiles: 
                 self.init_game(self.next_layout_id); self.next_layout_id, self.level_anim_state = None, 'in'
 
@@ -776,7 +772,7 @@ class MahjongGame:
 
     def update_animations(self):
         self.update_level_animations(); self.update_ui_animations()
-        if self.bg_transition_progress < 1.0: self.bg_transition_progress = min(1.0, self.bg_transition_progress + 0.02)
+        if self.bg_transition_progress < 1.0: self.bg_transition_progress = min(1.0, self.bg_transition_progress + 0.0056)
         self.update_victory_animation()
         if self.is_paused: return
         self.update_shuffle_animation(); self.update_history_animations()
@@ -795,10 +791,10 @@ class MahjongGame:
                     self.hint_pair = h; self.hint_count += 1
                     if hasattr(self, 'hint_btn_rect'):
                         p = 500; tx, ty = self.get_score_target_pos(); sx, sy = self.hint_btn_rect.center; self.flying_scores.append({'pos': [sx, sy], 'target': (tx, ty), 'text': f"-{p}", 'score_value': -p, 'progress': 0.0})
-        if self.level_anim_state in ('idle', 'clearing_shades'):
+        if self.level_anim_state in ('idle', 'clearing_shades') and self.shuffle_anim_state in ('idle', 'fading_out'):
             all_clear = True
             for t in self.layout:
-                ta = 0.0 if self.level_anim_state == 'clearing_shades' else t.get('target_gray_alpha', 0.0)
+                ta = 0.0 if (self.level_anim_state == 'clearing_shades' or self.shuffle_anim_state == 'fading_out') else t.get('target_gray_alpha', 0.0)
                 ca = t.get('gray_alpha', 0.0)
                 if ca < ta: t['gray_alpha'] = min(ta, ca + 2.5); all_clear = False
                 elif ca > ta: t['gray_alpha'] = max(ta, ca - 2.5); all_clear = False
@@ -933,8 +929,12 @@ class MahjongGame:
     def reset_game(self, l_id=None):
         self.won, self.lost = False, False
         if self.final_time is None: self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
-        if not self.layout and not self.animating_tiles and not self.matched_tiles and not self.victory_tiles: self.init_game(l_id); self.next_layout_id, self.level_anim_state, self.level_anim_progress = None, 'in', 0.0
-        else: self.next_layout_id, self.level_anim_state = l_id, 'clearing_shades'
+        # If board is empty (win), we wait for victory tiles to finish draining before starting next level
+        if not self.layout:
+            self.next_layout_id, self.level_anim_state, self.level_anim_progress = l_id, 'out', 0.0
+        else:
+            # Manual skip or loss: clear shades first, then do the standard 'out' movement
+            self.next_layout_id, self.level_anim_state = l_id, 'clearing_shades'
 
     def draw_cartridge(self, surface, rect, color=(0, 0, 0, 140), border_color=(218, 165, 32, 180)):
         s = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA); pygame.draw.rect(s, color, (0, 0, rect.width, rect.height), border_radius=12); pygame.draw.rect(s, border_color, (0, 0, rect.width, rect.height), 1, border_radius=12); surface.blit(s, rect.topleft)
@@ -1030,31 +1030,38 @@ class MahjongGame:
             for i,t in enumerate(self.sorted_layout):
                 anim = get_tile_anim_params(t, i, tot)
                 ox, oy = anim['off']
-                x, y = mx+t['pos'][0]*(self.tw+2)-t['pos'][2]*self.depth_off + ox, my+t['pos'][1]*(self.th+2)-t['pos'][2]*self.depth_off + oy
-                t['rect'] = pygame.Rect(x,y,self.tw,self.th)
+                fx, fy = mx+t['pos'][0]*(self.tw+2)-t['pos'][2]*self.depth_off + ox, my+t['pos'][1]*(self.th+2)-t['pos'][2]*self.depth_off + oy
+                t['rect'] = pygame.Rect(fx,fy,self.tw,self.th)
                 
-                img = self.tile_variants[t['type']]['filtered']
+                # Use pre-rendered 3D variant for opaque tiles to allow correct rotation of thickness
+                if anim['alpha'] == 255: img = self.tile_variants[t['type']]['3d']
+                else: img = self.tile_variants[t['type']]['filtered']
+                
                 if anim['scale'] != 1.0 or anim['rot'] != 0:
                     if anim['scale'] <= 0: continue
-                    img = pygame.transform.smoothscale(img, (max(1, int(self.tw * anim['scale'])), max(1, int(self.th * anim['scale']))))
+                    sw, sh = int(img.get_width() * anim['scale']), int(img.get_height() * anim['scale'])
+                    img = pygame.transform.smoothscale(img, (max(1, sw), max(1, sh)))
                     if anim['rot'] != 0: img = pygame.transform.rotate(img, anim['rot'])
                 
                 if anim['alpha'] < 255:
                     if anim['alpha'] <= 0: continue
                     img = img.copy(); img.set_alpha(anim['alpha'])
                 
-                ir = img.get_rect(center=t['rect'].center)
-                for j in range(self.depth_off, 0, -1):
-                    if anim['alpha'] < 255: continue # Skip 3D side for semi-transparent to avoid artifacts
-                    fac = (self.depth_off - j) / (self.depth_off - 1) if self.depth_off > 1 else 1.0; v = int(100 + (160 - 100) * (fac**3)); side_c = (75, 50, 25) if j >= self.depth_off - 1 else (v, int(v*0.96), int(v*0.85)); pygame.draw.rect(self.screen, side_c, ir.move(j,j), border_radius=rad)
+                # Align the blit correctly (rotate around face center)
+                if anim['rot'] != 0: blit_pos = img.get_rect(center=t['rect'].center).topleft
+                else: blit_pos = t['rect'].topleft
                 
-                if self.is_paused: self.screen.blit(self.blank_tile, ir.topleft)
-                else: self.screen.blit(img, ir.topleft)
+                if self.is_paused: self.screen.blit(self.blank_tile, blit_pos)
+                else: self.screen.blit(img, blit_pos)
                 
-                ga = t.get('gray_alpha', 0.0)
-                if ga > 0 and anim['alpha'] == 255 and self.level_anim_state in ('idle', 'clearing_shades'): self.gray_overlay.set_alpha(int(ga)); self.screen.blit(self.gray_overlay, ir.topleft)
+                # Shading only visible in stable states
+                if self.level_anim_state in ('idle', 'clearing_shades'):
+                    ga = t.get('gray_alpha', 0.0)
+                    if ga > 0 and anim['alpha'] == 255:
+                        self.gray_overlay.set_alpha(int(ga))
+                        self.screen.blit(self.gray_overlay, blit_pos)
                 if self.selected==t: pygame.draw.rect(self.screen,(255,255,0),t['rect'],6,5)
-                elif self.hint_pair and t in self.hint_pair: alp = int(128+127*np.sin(pygame.time.get_ticks()*0.01)); s=pygame.Surface((self.tw,self.th),pygame.SRCALPHA); pygame.draw.rect(s,(0,191,255,alp),s.get_rect(),8,5); self.screen.blit(s,ir.topleft)
+                elif self.hint_pair and t in self.hint_pair: alp = int(128+127*np.sin(pygame.time.get_ticks()*0.01)); s=pygame.Surface((self.tw,self.th),pygame.SRCALPHA); pygame.draw.rect(s,(0,191,255,alp),s.get_rect(),8,5); self.screen.blit(s,blit_pos)
         f_ui, f_val, f_sub = pygame.font.SysFont("Arial", 20, bold=True), pygame.font.SysFont("Arial", 22, bold=True), pygame.font.SysFont("Arial", 16, bold=True)
         if self.final_time is not None: el = self.final_time // 1000
         elif self.level_anim_state != 'idle': el = 0
@@ -1126,11 +1133,11 @@ class MahjongGame:
                 elif best_score is not None: win_surf.blit(f_stats.render(f"Record : {best_score}", True, (160, 160, 160)), (pw-295, 265))
             pygame.draw.rect(win_surf, (35, 35, 45), (80, 310, 230, 60), border_radius=12); win_surf.blit(f_label.render("MÉLANGES", True, (100, 150, 200)), (95, 320)); win_surf.blit(f_stats.render(str(self.shuffle_count), True, (255, 255, 255)), (95 + 140, 320)); best_sh = stats.get('prev_best_shuffles')
             if not self.lost:
-                if stats.get("is_new_shuffles_record"): win_surf.blit(f_record.render("RECORD !", True, (100, 200, 255)), (95, 342))
+                if stats.get("is_new_shuffles_record"): win_surf.blit(f_record.render("NOUVEAU RECORD !", True, (100, 200, 255)), (95, 342))
                 elif best_sh is not None and best_sh != 999: win_surf.blit(f_stats.render(f"Record : {best_sh}", True, (130, 130, 130)), (95, 342))
             pygame.draw.rect(win_surf, (35, 35, 45), (pw-310, 310, 230, 60), border_radius=12); win_surf.blit(f_label.render("INDICES", True, (180, 120, 220)), (pw-295, 320)); win_surf.blit(f_stats.render(str(self.hint_count), True, (255, 255, 255)), (pw-295 + 140, 320)); best_hi = stats.get('prev_best_hints')
             if not self.lost:
-                if stats.get("is_new_hints_record"): win_surf.blit(f_record.render("RECORD !", True, (200, 150, 255)), (pw-295, 342))
+                if stats.get("is_new_hints_record"): win_surf.blit(f_record.render("NOUVEAU RECORD !", True, (200, 150, 255)), (pw-295, 342))
                 elif best_hi is not None and best_hi != 999: win_surf.blit(f_stats.render(f"Record : {best_hi}", True, (130, 130, 130)), (pw-295, 342))
             gp_surf = f_stats.render(f"Total des parties gagnées : {self.global_games_played}", True, (180, 180, 180)); win_surf.blit(gp_surf, gp_surf.get_rect(center=(pw//2, 400))); btn_configs = [("Niveau Suivant", "random"), ("Choisir un niveau", "choose")]; bw, bh, gap = 200, 50, 40; total_bw = bw * len(btn_configs) + gap * (len(btn_configs) - 1); start_bx = (pw - total_bw) // 2; m_p = pygame.mouse.get_pos(); scale = 0.8 + 0.2 * self.win_ui_progress; sw, sh = int(pw * scale), int(ph * scale); sx, sy = (self.width-sw)//2, (self.height-sh)//2; adj_m_p = ((m_p[0] - sx) / scale, (m_p[1] - sy) / scale); self.win_btn_rects = []; f_btn = pygame.font.SysFont("Arial", 20, bold=True)
             for i, (label, b_id) in enumerate(btn_configs):
