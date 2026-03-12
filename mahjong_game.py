@@ -72,7 +72,7 @@ class MahjongGame:
         self.last_win_stats = {}
         self.layout, self.sorted_layout = [], []
         self.flying_scores = []
-        
+        self.particles = []
         self.victory_anim_state = 'idle'
         self.victory_tiles = []
         self.victory_anim_start_time = 0
@@ -337,10 +337,18 @@ class MahjongGame:
         self.depth_off = max(2, int((self.tw // 10 + 1) * 1.2))
         self.tile_variants = []
         self.std_tile_variants = []
-        self.blank_tile = pygame.Surface((self.tw, self.th), pygame.SRCALPHA)
-        face_color = (242, 228, 185); rad = int(self.tw/12)
-        pygame.draw.rect(self.blank_tile, face_color, (0, 0, self.tw, self.th), border_radius=rad)
-        pygame.draw.rect(self.blank_tile, (198, 180, 145), (0, 0, self.tw, self.th), 2, border_radius=rad)
+        # Create blank 3D tile for pause mode
+        rad = max(3, int(self.tw/12)); tw3d, th3d = self.tw + self.depth_off, self.th + self.depth_off
+        self.blank_tile_3d = pygame.Surface((tw3d, th3d), pygame.SRCALPHA)
+        face_color = (242, 228, 185)
+        for j in range(self.depth_off, 0, -1):
+            fac = (self.depth_off - j) / (self.depth_off - 1) if self.depth_off > 1 else 1.0
+            v = int(100 + (160 - 100) * (fac**3))
+            side_c = (75, 50, 25) if j >= self.depth_off - 1 else (v, int(v*0.96), int(v*0.85))
+            pygame.draw.rect(self.blank_tile_3d, side_c, (j, j, self.tw, self.th), border_radius=rad)
+        pygame.draw.rect(self.blank_tile_3d, face_color, (0, 0, self.tw, self.th), border_radius=rad)
+        pygame.draw.rect(self.blank_tile_3d, (198, 180, 145), (0, 0, self.tw, self.th), 2, border_radius=rad)
+        
         ivory_color = (242, 228, 185)
         for i, img_hd in enumerate(self.tile_images_hd):
             scaled = pygame.transform.smoothscale(img_hd, (self.tw, self.th))
@@ -573,10 +581,31 @@ class MahjongGame:
         final_tiles.sort(key=lambda t: (t[2], t[1], t[0])); return final_tiles, self.layout_w_tiles, self.layout_h_tiles
 
     def start_match_animation(self, t1, t2):
+        p1, p2 = t1['rect'].topleft, t2['rect'].topleft
+        mid_x, mid_y = (p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2
+        align_y = mid_y 
         ty = self.height - self.th - 20; tx1, tx2 = self.width-self.tw-20, self.width-self.tw*2-30
+        
+        # Calculate distance to modulate zoom intensity
+        dist_init = ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)**0.5
+        # Cubic zoom modulation: extremely low zoom for close tiles, significant only for far ones
+        zoom_mod = pow(min(1.0, dist_init / 1000.0), 3)
+        
         for i, t in enumerate([t1, t2]):
-            self.animating_tiles.append({'image_index': t['type'], 'pos': list(t['rect'].topleft if t['rect'] else (0,0)), 
-                                        'target': (tx2 if i==0 else tx1, ty), 'original_tile': {'type':t['type'], 'pos':t['pos'], 'rect':None}})
+            sx, sy = t['rect'].topleft
+            # cp forces vertical alignment first
+            cp = (sx, align_y)
+            self.animating_tiles.append({
+                'image_index': t['type'], 
+                'start_pos': (sx, sy),
+                'cp': cp,
+                'mid_pos': (mid_x - self.tw//2, align_y),
+                'target': (tx2 if i==0 else tx1, ty), 
+                'original_tile': {'type':t['type'], 'pos':t['pos'], 'rect':None},
+                'phase': 'meeting',
+                'progress': 0.0,
+                'zoom_mod': zoom_mod
+            })
             if t in self.layout: self.layout.remove(t)
         self.update_sorted_layout()
 
@@ -770,10 +799,23 @@ class MahjongGame:
                 self.options_ui_state = 'closed'
                 if not self.is_paused: paused_duration = pygame.time.get_ticks() - self.pause_start_ticks; self.adjust_times_after_pause(paused_duration)
 
+    def spawn_particles(self, x, y, color=(255, 215, 0)):
+        for _ in range(40):
+            angle = random.uniform(0, 2*np.pi); speed = random.uniform(3, 10)
+            self.particles.append({'pos': [x, y], 'vel': [np.cos(angle)*speed, np.sin(angle)*speed], 'life': 255, 'color': color, 'size': random.randint(3, 8)})
+
     def update_animations(self):
         self.update_level_animations(); self.update_ui_animations()
         if self.bg_transition_progress < 1.0: self.bg_transition_progress = min(1.0, self.bg_transition_progress + 0.0056)
         self.update_victory_animation()
+        
+        # Update particles
+        new_particles = []
+        for p in self.particles:
+            p['pos'][0] += p['vel'][0]; p['pos'][1] += p['vel'][1]; p['life'] -= 10
+            if p['life'] > 0: new_particles.append(p)
+        self.particles = new_particles
+
         if self.is_paused: return
         self.update_shuffle_animation(); self.update_history_animations()
         rem_s = []
@@ -784,13 +826,7 @@ class MahjongGame:
         self.flying_scores = rem_s
         if self.displayed_score < self.current_score: self.displayed_score += max(1, int((self.current_score - self.displayed_score) * 0.1))
         elif self.displayed_score > self.current_score: self.displayed_score -= max(1, int((self.displayed_score - self.current_score) * 0.1))
-        if getattr(self, 'auto_hint', True) and not self.won and not self.hint_pair and self.stats_ui_state == 'closed' and self.options_ui_state == 'closed':
-            if pygame.time.get_ticks() - self.last_move_time > 60000:
-                h = self.get_hint()
-                if h:
-                    self.hint_pair = h; self.hint_count += 1
-                    if hasattr(self, 'hint_btn_rect'):
-                        p = 500; tx, ty = self.get_score_target_pos(); sx, sy = self.hint_btn_rect.center; self.flying_scores.append({'pos': [sx, sy], 'target': (tx, ty), 'text': f"-{p}", 'score_value': -p, 'progress': 0.0})
+        
         if self.level_anim_state in ('idle', 'clearing_shades') and self.shuffle_anim_state in ('idle', 'fading_out'):
             all_clear = True
             for t in self.layout:
@@ -800,14 +836,48 @@ class MahjongGame:
                 elif ca > ta: t['gray_alpha'] = max(ta, ca - 2.5); all_clear = False
             if self.level_anim_state == 'clearing_shades' and all_clear:
                 self.level_anim_state = 'out'; self.level_anim_progress = 1.0
+        
         fin = []
         for a in self.animating_tiles:
-            dx, dy = a['target'][0]-a['pos'][0], a['target'][1]-a['pos'][1]; dist = (dx**2+dy**2)**0.5
-            if dist < 25: a['pos'] = list(a['target']); fin.append(a)
-            else: a['pos'][0] += (dx/dist)*25; a['pos'][1] += (dy/dist)*25
+            phase = a.get('phase')
+            zm = a.get('zoom_mod', 1.0)
+            if phase == 'meeting':
+                a['progress'] += 0.0225 
+                p = a['progress']
+                # Altitude: Stay high at impact (use half-sine for 0->1 transition)
+                a['scale'] = 1.0 + np.sin(p * np.pi / 2) * 0.3 * zm
+                if p >= 1.0:
+                    a['pos'] = list(a['mid_pos']); a['phase'] = 'to_pile'; a['progress'] = 0.0; a['impact_pos'] = list(a['mid_pos'])
+                    # Initial scale for to_pile is the impact scale
+                    a['impact_scale'] = 1.0 + 0.3 * zm
+                    if a == self.animating_tiles[-1]: self.spawn_particles(a['mid_pos'][0] + self.tw//2, a['mid_pos'][1] + self.th//2)
+                else:
+                    p0, p1, p2 = a['start_pos'], a['cp'], a['mid_pos']; t = p
+                    a['pos'] = [(1-t)**2 * p0[0] + 2*(1-t)*t*p1[0] + t**2 * p2[0], (1-t)**2 * p0[1] + 2*(1-t)*t*p1[1] + t**2 * p2[1]]
+            
+            elif phase == 'to_pile':
+                a['progress'] += 0.015 
+                p = a['progress']
+                # Altitude: Start from impact height, peak higher, then land
+                impact_s = a.get('impact_scale', 1.0)
+                a['scale'] = impact_s + np.sin(p * np.pi) * 0.4 * zm
+                if p >= 1.0: a['pos'] = list(a['target']); fin.append(a); a['scale'] = 1.0
+                else:
+                    sp, ep = a['impact_pos'], a['target']; arc = np.sin(p * np.pi) * 150
+                    a['pos'] = [sp[0] + (ep[0] - sp[0]) * p, sp[1] + (ep[1] - sp[1]) * p - arc]
+            else:
+                target = a.get('target', (0,0))
+                dx, dy = target[0]-a['pos'][0], target[1]-a['pos'][1]; dist = (dx**2+dy**2)**0.5
+                speed = 12; a['scale'] = 1.0
+                if dist < speed: a['pos'] = list(target); fin.append(a)
+                else: a['pos'][0] += (dx/dist)*speed; a['pos'][1] += (dy/dist)*speed
+        
         for a in fin: self.animating_tiles.remove(a); self.matched_tiles.append(a)
+        
         if not self.won and not self.lost and not self.animating_tiles and self.level_anim_state == 'idle':
-            if not self.layout: self.won = True; self.matched_tiles = []; self.show_history = False
+            if not self.layout:
+                self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
+                self.won = True; self.matched_tiles = []; self.show_history = False
             elif not self.has_moves():
                 if self.check_loss_condition():
                     self.lost = True; self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks); self.show_history = False; self.win_ui_state, self.win_ui_progress = 'opening', 0.0
@@ -1051,7 +1121,7 @@ class MahjongGame:
                 if anim['rot'] != 0: blit_pos = img.get_rect(center=t['rect'].center).topleft
                 else: blit_pos = t['rect'].topleft
                 
-                if self.is_paused: self.screen.blit(self.blank_tile, blit_pos)
+                if self.is_paused: self.screen.blit(self.blank_tile_3d, t['rect'].topleft)
                 else: self.screen.blit(img, blit_pos)
                 
                 # Shading only visible in stable states
@@ -1095,8 +1165,16 @@ class MahjongGame:
                 rect = img.get_rect(center=(int(t['pos'][0] + (self.tw + self.depth_off) * scale // 2), int(t['pos'][1] + (self.th + self.depth_off) * scale // 2))); self.screen.blit(img, rect)
         at_tot = len(self.animating_tiles + self.undo_animating_tiles)
         for i, a in enumerate(self.animating_tiles + self.undo_animating_tiles):
-            # For these, we don't apply level transitions, just standard positions
-            x, y = a['pos']; self.screen.blit(self.tile_variants[a['image_index']]['filtered'], (x, y))
+            x, y = a['pos']; scale = a.get('scale', 1.0)
+            # Use 3D variant for flying tiles
+            img = self.tile_variants[a['image_index']]['3d']
+            if scale != 1.0:
+                sw, sh = int(img.get_width() * scale), int(img.get_height() * scale)
+                img = pygame.transform.smoothscale(img, (max(1, sw), max(1, sh)))
+            
+            # Center the tile while zooming so it doesn't shift
+            rect = img.get_rect(center=(int(x + self.tw // 2), int(y + self.th // 2)))
+            self.screen.blit(img, rect)
         if not self.won and (self.show_history or self.history_anim_state != 'idle' or self.history_anim_progress > 0):
             csy, ih, start_y = self.height - self.th - 15, self.th + 15, 110; vh = self.matched_tiles[-(max(1, (csy-start_y)//ih)*2):]; hp = [(vh[i], vh[i+1]) for i in range(0, len(vh), 2) if i+1 < len(vh)]; hp.reverse(); self.history_rects = []; e = 1-(1-self.history_anim_progress)**3; tx1, tx2 = self.width-self.tw-25, self.width-self.tw*2-40
             for idx, p in enumerate(hp):
@@ -1109,6 +1187,13 @@ class MahjongGame:
             f_score = pygame.font.SysFont("Arial", 40, bold=True)
             for s in self.flying_scores:
                 p = s['progress']; ease_p = 1.0-(1.0-p)**2; curr_x = s['pos'][0]+(s['target'][0]-s['pos'][0])*ease_p; curr_y = s['pos'][1]+(s['target'][1]-s['pos'][1])*ease_p; val = s.get('score_value', 0); color = (255, 100, 100) if val < 0 else (255, 215, 0); txt_surf = f_score.render(s['text'], True, color); shadow_surf = f_score.render(s['text'], True, (0, 0, 0)); txt_rect = txt_surf.get_rect(center=(int(curr_x), int(curr_y))); self.screen.blit(shadow_surf, txt_rect.move(3, 3)); self.screen.blit(txt_surf, txt_rect)
+        
+        # Draw particles
+        for p in self.particles:
+            s = pygame.Surface((p['size']*2, p['size']*2), pygame.SRCALPHA)
+            pygame.draw.circle(s, p['color'] + (p['life'],), (p['size'], p['size']), p['size'])
+            self.screen.blit(s, (p['pos'][0]-p['size'], p['pos'][1]-p['size']))
+
         if not self.won and self.history_anim_state == 'idle' and self.shuffle_ui_state == 'closed' and self.win_ui_state == 'closed':
             bw, bh, gap = 145, 38, 12; bx, by = 20, self.height - bh - 20; f_btn, m_pos = pygame.font.SysFont("Arial", 16, True), pygame.mouse.get_pos()
             self.stats_btn_rect = pygame.Rect(bx, by, bw, bh); self.draw_button(self.screen, self.stats_btn_rect, "Statistiques", (50, 100, 100), f_btn, self.stats_btn_rect.collidepoint(m_pos), self.pressed_button == "stats")
@@ -1214,7 +1299,7 @@ class MahjongGame:
         self.screen.blit(scaled_surf, (sx, sy))
 
     def draw_options_ui(self):
-        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA); overlay.fill((0, 0, 0, int(180 * self.options_ui_progress))); self.screen.blit(overlay, (0, 0)); sw, sh, scale = 700, 540, 0.8 + 0.2 * self.options_ui_progress; w, h = int(sw * scale), int(sh * scale); x, y = (self.width - w) // 2, (self.height - h) // 2; panel = pygame.Surface((sw, sh), pygame.SRCALPHA); pygame.draw.rect(panel, (30, 30, 35, 255), (0, 0, sw, sh), border_radius=20); pygame.draw.rect(panel, (218, 165, 32, 255), (0, 0, sw, sh), 4, border_radius=20); f_title, f_msg = pygame.font.SysFont("Arial", 32, True), pygame.font.SysFont("Arial", 22); title_surf = f_title.render("Options", True, (255, 255, 255)); panel.blit(title_surf, title_surf.get_rect(centerx=sw//2, y=30)); m_pos = pygame.mouse.get_pos(); adj_m_pos = ((m_pos[0] - x) / scale, (m_pos[1] - y) / scale); start_y, spacing = 110, 80; opt_configs = [("Ombrage des tuiles bloquées :", 'show_gray_tiles', 'toggle_gray_rect'), ("Indice automatique :", 'auto_hint', 'toggle_hint_rect')]
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA); overlay.fill((0, 0, 0, int(180 * self.options_ui_progress))); self.screen.blit(overlay, (0, 0)); sw, sh, scale = 700, 540, 0.8 + 0.2 * self.options_ui_progress; w, h = int(sw * scale), int(sh * scale); x, y = (self.width - w) // 2, (self.height - h) // 2; panel = pygame.Surface((sw, sh), pygame.SRCALPHA); pygame.draw.rect(panel, (30, 30, 35, 255), (0, 0, sw, ph), border_radius=20); pygame.draw.rect(panel, (218, 165, 32, 255), (0, 0, sw, sh), 4, border_radius=20); f_title, f_msg = pygame.font.SysFont("Arial", 32, True), pygame.font.SysFont("Arial", 22); title_surf = f_title.render("Options", True, (255, 255, 255)); panel.blit(title_surf, title_surf.get_rect(centerx=sw//2, y=30)); m_pos = pygame.mouse.get_pos(); adj_m_pos = ((m_pos[0] - x) / scale, (m_pos[1] - y) / scale); start_y, spacing = 110, 80; opt_configs = [("Ombrage des tuiles bloquées :", 'show_gray_tiles', 'toggle_gray_rect'), ("Indice automatique :", 'auto_hint', 'toggle_hint_rect')]
         for i, (txt, attr, rect_name) in enumerate(opt_configs):
             oy = start_y + i * spacing; label = f_msg.render(txt, True, (220, 220, 220)); panel.blit(label, (50, oy)); rect = pygame.Rect(sw - 130, oy - 5, 80, 34); setattr(self, rect_name, rect); val = getattr(self, attr); t_color = (46, 139, 87) if val else (100, 100, 110)
             if rect.collidepoint(adj_m_pos): t_color = tuple(min(255, c + 20) for c in t_color)
@@ -1277,7 +1362,9 @@ class MahjongGame:
                 self.play_click_sfx()
                 if self.hint_pair and t in self.hint_pair:
                     t1, t2 = self.hint_pair; self.start_match_animation(t1, t2); self.selected, self.hint_pair, self.last_move_time = None, None, pygame.time.get_ticks(); self.last_match_time = pygame.time.get_ticks(); self.match_multiplier = 1.0
-                    if not self.layout: self.won = True
+                    if not self.layout: 
+                        self.won = True
+                        if self.final_time is None: self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
                     elif not self.has_moves():
                         if self.check_loss_condition(): self.lost = True; self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks); self.show_history = False; self.win_ui_state, self.win_ui_progress = 'opening', 0.0
                         else: self.shuffle_needed = True
@@ -1291,7 +1378,9 @@ class MahjongGame:
                         move_score = int(base_points * self.score_scaling); self.last_match_time = now
                         if t['rect']: sx, sy = t['rect'].center; tx, ty = self.get_score_target_pos(); self.flying_scores.append({'pos': [sx, sy], 'target': (tx, ty), 'text': f"+{move_score}", 'score_value': move_score, 'progress': 0.0})
                         self.start_match_animation(self.selected, t); self.selected = None
-                        if not self.layout: self.won = True
+                        if not self.layout: 
+                            self.won = True
+                            if self.final_time is None: self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
                         elif not self.has_moves():
                             if self.check_loss_condition(): self.lost = True; self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks); self.show_history = False; self.win_ui_state, self.win_ui_progress = 'opening', 0.0
                             else: self.shuffle_needed = True
