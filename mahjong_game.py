@@ -76,7 +76,7 @@ class MahjongGame:
         self.victory_anim_state = 'idle'
         self.victory_tiles = []
         self.victory_anim_start_time = 0
-        self.victory_anim_idx = 11 # Forced to Fontaine for now
+        self.victory_anim_idx = 11 
         self.queued_debug_anim = None
         
         self.win_ui_progress = 0.0
@@ -115,6 +115,8 @@ class MahjongGame:
         self.pressed_button = None
         self.is_manual_paused = False
         self.click_sound = None
+        self.is_paused_by_focus = False
+        self.pause_start_ticks = 0
         self.MUSIC_END = pygame.USEREVENT + 1
         pygame.mixer.music.set_endevent(self.MUSIC_END)
         
@@ -128,7 +130,6 @@ class MahjongGame:
         self.recompute_scaling()
         self.current_bg = None
         self.start_ticks = pygame.time.get_ticks()
-        self.pause_start_ticks = 0
         self.level_pool = []
         self.init_game(None)
 
@@ -323,31 +324,73 @@ class MahjongGame:
         f_ui = pygame.font.SysFont("Arial", 24, bold=True)
         text_h = f_ui.get_height()
         margin_x = self.width * 0.05
-        top_margin = 100 + text_h
-        bottom_margin = 160
+        
+        # Base margins
+        top_margin = 100
+        bottom_margin = 170
+        
+        # Squeeze margins for dense layouts to allow larger tiles
+        if self.layout_h_tiles > 9 or self.layout_w_tiles > 16:
+            top_margin = 80
+            bottom_margin = 140
+            
         available_w = self.width - 2 * margin_x
         available_h = self.height - top_margin - bottom_margin
+        
         std_unit_w = (available_w / GRID_W) * 1.5; std_unit_h = (available_h / GRID_H) * 1.5
         self.std_tw = int(min(std_unit_w - 2, (std_unit_h - 2) * 0.75))
         self.std_th = int(self.std_tw * 1.33)
+        
         unit_w = available_w / max(1, self.layout_w_tiles); unit_h = available_h / max(1, self.layout_h_tiles)
         self.tw = int(min(unit_w - 2, (unit_h - 2) * 0.75)); self.th = int(self.tw * 1.33)
-        self.board_offset_x = margin_x + (available_w - self.layout_w_tiles * (self.tw + 2)) // 2
-        self.board_offset_y = top_margin + (available_h - self.layout_h_tiles * (self.th + 2)) // 2
         self.depth_off = max(2, int((self.tw // 10 + 1) * 1.2))
+        
+        pos = getattr(self, 'current_layout_pos', None)
+        if pos:
+            # Calcul du footprint visuel réel (tenant compte du décalage Z de chaque tuile)
+            # Pour chaque tuile (gx, gy, gz), sa position écran Y est :
+            # screen_y = board_offset_y + gy * (th + 2) - gz * depth_off
+            
+            # On cherche les extrêmes de (gy * (th + 2) - gz * depth_off)
+            y_vis_vals = [p[1] * (self.th + 2) - p[2] * self.depth_off for p in pos]
+            min_y_vis = min(y_vis_vals)
+            max_y_vis = max(y_vis_vals) + self.th # +th pour inclure le bas de la tuile
+            
+            span_y = max_y_vis - min_y_vis
+            
+            if span_y > available_h:
+                ratio = available_h / span_y
+                self.th = int(self.th * ratio)
+                self.tw = int(self.th / 1.33)
+                self.depth_off = max(2, int((self.tw // 10 + 1) * 1.2))
+                # Recalcul après changement d'échelle
+                y_vis_vals = [p[1] * (self.th + 2) - p[2] * self.depth_off for p in pos]
+                min_y_vis = min(y_vis_vals)
+                max_y_vis = max(y_vis_vals) + self.th
+                span_y = max_y_vis - min_y_vis
+
+            gap_y = (available_h - span_y) // 2
+            # On veut que top_margin + gap_y soit égal à board_offset_y + min_y_vis
+            self.board_offset_y = top_margin + gap_y - min_y_vis
+        else:
+            self.board_offset_y = top_margin + (available_h - self.layout_h_tiles * (self.th + 2)) // 2
+
+        self.board_offset_x = margin_x + (available_w - self.layout_w_tiles * (self.tw + 2)) // 2
+        
         self.tile_variants = []
         self.std_tile_variants = []
+        
         # Create blank 3D tile for pause mode
-        rad = max(3, int(self.tw/12)); tw3d, th3d = self.tw + self.depth_off, self.th + self.depth_off
-        self.blank_tile_3d = pygame.Surface((tw3d, th3d), pygame.SRCALPHA)
-        face_color = (242, 228, 185)
+        rad_b = max(3, int(self.tw/12)); tw3db, th3d_b = self.tw + self.depth_off, self.th + self.depth_off
+        self.blank_tile_3d = pygame.Surface((tw3db, th3d_b), pygame.SRCALPHA)
+        face_color_b = (242, 228, 185)
         for j in range(self.depth_off, 0, -1):
             fac = (self.depth_off - j) / (self.depth_off - 1) if self.depth_off > 1 else 1.0
             v = int(100 + (160 - 100) * (fac**3))
             side_c = (75, 50, 25) if j >= self.depth_off - 1 else (v, int(v*0.96), int(v*0.85))
-            pygame.draw.rect(self.blank_tile_3d, side_c, (j, j, self.tw, self.th), border_radius=rad)
-        pygame.draw.rect(self.blank_tile_3d, face_color, (0, 0, self.tw, self.th), border_radius=rad)
-        pygame.draw.rect(self.blank_tile_3d, (198, 180, 145), (0, 0, self.tw, self.th), 2, border_radius=rad)
+            pygame.draw.rect(self.blank_tile_3d, side_c, (j, j, self.tw, self.th), border_radius=rad_b)
+        pygame.draw.rect(self.blank_tile_3d, face_color_b, (0, 0, self.tw, self.th), border_radius=rad_b)
+        pygame.draw.rect(self.blank_tile_3d, (198, 180, 145), (0, 0, self.tw, self.th), 2, border_radius=rad_b)
         
         ivory_color = (242, 228, 185)
         for i, img_hd in enumerate(self.tile_images_hd):
@@ -427,17 +470,23 @@ class MahjongGame:
             else: self.current_bg = random.choice(self.bg_images); self.bg_transition_progress = 1.0
             self.scaled_bg = self.scale_background(self.current_bg)
         pos, self.layout_w_tiles, self.layout_h_tiles = self.get_layout_positions(l_id)
-        self.recompute_scaling(); self.layout = [{'type': 0, 'pos': p, 'rect': None, 'anim_factor': (i/len(pos))*0.4 + random.random()*0.1} for i, p in enumerate(pos)]
+        self.current_layout_pos = pos
+        self.recompute_scaling()
+        self.layout = [{'type': 0, 'pos': p, 'rect': None, 'anim_factor': (i/len(pos))*0.4 + random.random()*0.1} for i, p in enumerate(pos)]
         self.initial_tile_count = len(self.layout) if self.layout else 144; self.score_scaling = 144.0 / self.initial_tile_count
         self.selected, self.won, self.lost, self.hint_pair = None, False, False, None; self.victory_anim_state, self.victory_tiles = 'idle', []
-        self.shuffle_count = 0; self.hint_count = 0; now = self.pause_start_ticks if self.is_paused else pygame.time.get_ticks()
+        self.victory_stats_processed = False
+        self.shuffle_count = 0; self.hint_count = 0; now = pygame.time.get_ticks()
         self.last_move_time, self.start_ticks, self.final_time, self.current_score, self.displayed_score, self.flying_scores = now, now, None, 0, 0, []
         self.last_match_time, self.match_multiplier = self.start_ticks, 1.0
         self.make_solvable(); self.update_sorted_layout()
 
     @property
     def is_paused(self):
-        return (getattr(self, 'is_manual_paused', False) or getattr(self, 'is_paused_by_focus', False) or self.stats_ui_state != 'closed' or self.options_ui_state != 'closed')
+        return (getattr(self, 'is_manual_paused', False) or 
+                getattr(self, 'is_paused_by_focus', False) or 
+                self.stats_ui_state != 'closed' or 
+                self.options_ui_state != 'closed')
 
     def check_loss_condition(self):
         if not self.layout: return False
@@ -445,8 +494,14 @@ class MahjongGame:
         return free_count < 2
 
     def finalize_victory(self):
-        if self.final_time is not None: return
-        self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
+        # Allow processing even if final_time was set earlier (at match time)
+        if self.final_time is None:
+            self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
+        
+        # Check a flag to ensure we only increment stats ONCE per victory
+        if getattr(self, 'victory_stats_processed', False): return
+        self.victory_stats_processed = True
+        
         self.victory_anim_idx = 11; self.global_games_played += 1
         if self.shuffle_count == 0: self.wins_without_shuffle += 1
         elif self.shuffle_count == 1: self.wins_with_one_shuffle += 1
@@ -585,27 +640,11 @@ class MahjongGame:
         mid_x, mid_y = (p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2
         align_y = mid_y 
         ty = self.height - self.th - 20; tx1, tx2 = self.width-self.tw-20, self.width-self.tw*2-30
-        
-        # Calculate distance to modulate zoom intensity
         dist_init = ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)**0.5
-        # Cubic zoom modulation: extremely low zoom for close tiles, significant only for far ones
         zoom_mod = pow(min(1.0, dist_init / 1000.0), 3)
-        
         for i, t in enumerate([t1, t2]):
-            sx, sy = t['rect'].topleft
-            # cp forces vertical alignment first
-            cp = (sx, align_y)
-            self.animating_tiles.append({
-                'image_index': t['type'], 
-                'start_pos': (sx, sy),
-                'cp': cp,
-                'mid_pos': (mid_x - self.tw//2, align_y),
-                'target': (tx2 if i==0 else tx1, ty), 
-                'original_tile': {'type':t['type'], 'pos':t['pos'], 'rect':None},
-                'phase': 'meeting',
-                'progress': 0.0,
-                'zoom_mod': zoom_mod
-            })
+            sx, sy = t['rect'].topleft; cp = (sx, align_y)
+            self.animating_tiles.append({'image_index': t['type'], 'start_pos': (sx, sy), 'cp': cp, 'mid_pos': (mid_x, align_y), 'target': (tx2 if i==0 else tx1, ty), 'original_tile': {'type':t['type'], 'pos':t['pos'], 'rect':None}, 'phase': 'meeting', 'progress': 0.0, 'zoom_mod': zoom_mod})
             if t in self.layout: self.layout.remove(t)
         self.update_sorted_layout()
 
@@ -652,92 +691,53 @@ class MahjongGame:
             for d in self.shuffle_tiles_data:
                 tile_prog = max(0.0, min(1.0, (total_prog - d['delay']) * d['speed_mod']))
                 if tile_prog < 1.0: all_finished = False
-                
-                # Easing functions
                 ease_io = 4 * tile_prog**3 if tile_prog < 0.5 else 1 - pow(-2 * tile_prog + 2, 3) / 2
-                ease_out = 1 - pow(1 - tile_prog, 3)
-                ease_elastic = 1 + 2.70158 * pow(tile_prog - 1, 3) + 1.70158 * pow(tile_prog - 1, 2) if tile_prog > 0 else 0
-                
-                style = self.shuffle_anim_idx % 9
-                arc_sin = np.sin(np.pi * tile_prog)
-                d['arc_sin'] = arc_sin
-                
-                if style == 0: # Classic Arc
-                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io
-                    base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
-                    dx, dy = d['end_pos'][0] - d['start_pos'][0], d['end_pos'][1] - d['start_pos'][1]
-                    px, py = -dy, dx; length = (px**2 + py**2)**0.5 or 1
-                    d['current_pos'][0] = base_x + (px / length) * d['arc_strength'] * d['arc_dir'] * arc_sin
-                    d['current_pos'][1] = base_y + (py / length) * d['arc_strength'] * d['arc_dir'] * arc_sin
+                arc_sin = np.sin(np.pi * tile_prog); d['arc_sin'] = arc_sin; style = self.shuffle_anim_idx % 9
+                if style == 0:
+                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io; base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
+                    dx, dy = d['end_pos'][0] - d['start_pos'][0], d['end_pos'][1] - d['start_pos'][1]; px, py = -dy, dx; length = (px**2 + py**2)**0.5 or 1
+                    d['current_pos'][0] = base_x + (px / length) * d['arc_strength'] * d['arc_dir'] * arc_sin; d['current_pos'][1] = base_y + (py / length) * d['arc_strength'] * d['arc_dir'] * arc_sin
                     d['rot'] = arc_sin * d['max_tilt']; d['scale'] = 1.0 + arc_sin * d['scale_mod']
-                
-                elif style == 1: # Elastic Bounce
-                    d['current_pos'][0] = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_elastic
-                    d['current_pos'][1] = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_elastic
+                elif style == 1:
+                    ease_elastic = 1 + 2.70158 * pow(tile_prog - 1, 3) + 1.70158 * pow(tile_prog - 1, 2) if tile_prog > 0 else 0
+                    d['current_pos'][0] = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_elastic; d['current_pos'][1] = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_elastic
                     d['rot'] = 0; d['scale'] = 1.0 + arc_sin * 0.2
-
-                elif style == 2: # Sine Wave Horizontal
-                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io
-                    base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
-                    d['current_pos'][0] = base_x + np.sin(tile_prog * np.pi * 2 + d['phase']) * 100 * arc_sin
-                    d['current_pos'][1] = base_y
+                elif style == 2:
+                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io; base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
+                    d['current_pos'][0] = base_x + np.sin(tile_prog * np.pi * 2 + d['phase']) * 100 * arc_sin; d['current_pos'][1] = base_y
                     d['rot'] = np.cos(tile_prog * np.pi * 2 + d['phase']) * 30 * arc_sin; d['scale'] = 1.0
-
-                elif style == 3: # Zoom In/Out
-                    d['current_pos'][0] = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io
-                    d['current_pos'][1] = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
+                elif style == 3:
+                    d['current_pos'][0] = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io; d['current_pos'][1] = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
                     d['scale'] = 1.0 + arc_sin * 2.0; d['rot'] = tile_prog * 360
-
-                elif style == 4: # Spin 720
-                    d['current_pos'][0] = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io
-                    d['current_pos'][1] = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
+                elif style == 4:
+                    d['current_pos'][0] = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io; d['current_pos'][1] = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
                     d['rot'] = tile_prog * 720; d['scale'] = 1.0 + arc_sin * 0.3
-
-                elif style == 5: # Vertical Wave
-                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io
-                    base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
-                    d['current_pos'][0] = base_x
-                    d['current_pos'][1] = base_y + np.sin(tile_prog * np.pi * 2 + d['phase']) * 100 * arc_sin
+                elif style == 5:
+                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io; base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
+                    d['current_pos'][0] = base_x; d['current_pos'][1] = base_y + np.sin(tile_prog * np.pi * 2 + d['phase']) * 100 * arc_sin
                     d['rot'] = np.sin(tile_prog * np.pi * 2) * 20; d['scale'] = 1.0
-
-                elif style == 6: # Heartbeat (Pulse)
-                    d['current_pos'][0] = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io
-                    d['current_pos'][1] = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
-                    pulse = np.sin(tile_prog * np.pi * 4)
-                    d['scale'] = 1.0 + max(0, pulse) * 0.5; d['rot'] = 0
-
-                elif style == 7: # ZigZag
-                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io
-                    base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
-                    zigzag = np.abs(np.sin(tile_prog * np.pi * 4)) * 100
-                    d['current_pos'][0] = base_x + zigzag * d['arc_dir']
-                    d['current_pos'][1] = base_y
+                elif style == 6:
+                    d['current_pos'][0] = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io; d['current_pos'][1] = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
+                    pulse = np.sin(tile_prog * np.pi * 4); d['scale'] = 1.0 + max(0, pulse) * 0.5; d['rot'] = 0
+                elif style == 7:
+                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io; base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
+                    zigzag = np.abs(np.sin(tile_prog * np.pi * 4)) * 100; d['current_pos'][0] = base_x + zigzag * d['arc_dir']; d['current_pos'][1] = base_y
                     d['rot'] = d['arc_dir'] * zigzag * 0.5; d['scale'] = 1.0
-
-                elif style == 8: # Swirl individual
-                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io
-                    base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
-                    swirl_r = 60 * arc_sin
-                    d['current_pos'][0] = base_x + np.cos(tile_prog * np.pi * 6 + d['phase']) * swirl_r
-                    d['current_pos'][1] = base_y + np.sin(tile_prog * np.pi * 6 + d['phase']) * swirl_r
+                elif style == 8:
+                    base_x = d['start_pos'][0] + (d['end_pos'][0] - d['start_pos'][0]) * ease_io; base_y = d['start_pos'][1] + (d['end_pos'][1] - d['start_pos'][1]) * ease_io
+                    swirl_r = 60 * arc_sin; d['current_pos'][0] = base_x + np.cos(tile_prog * np.pi * 6 + d['phase']) * swirl_r; d['current_pos'][1] = base_y + np.sin(tile_prog * np.pi * 6 + d['phase']) * swirl_r
                     d['rot'] = tile_prog * 360; d['scale'] = 1.0
-
-                d['current_pos'][0] = max(-200, min(self.width + 200, d['current_pos'][0]))
-                d['current_pos'][1] = max(-200, min(self.height + 200, d['current_pos'][1]))
-                d['current_z'] = d['start_z'] + (d['end_z'] - d['start_z']) * tile_prog
-            
+                d['current_pos'][0] = max(-200, min(self.width + 200, d['current_pos'][0])); d['current_pos'][1] = max(-200, min(self.height + 200, d['current_pos'][1])); d['current_z'] = d['start_z'] + (d['end_z'] - d['start_z']) * tile_prog
             self.shuffle_tiles_data.sort(key=lambda d: d['current_z'])
             if all_finished and total_prog >= 1.0:
-                self.shuffle_anim_idx = random.randint(0, 8)
-                self.shuffle_anim_state, self.shuffle_tiles_data = 'idle', []; self.last_match_time = pygame.time.get_ticks(); self.last_move_time = self.last_match_time
-                self.shuffle_refused = False
+                self.shuffle_anim_idx = random.randint(0, 8); self.shuffle_anim_state, self.shuffle_tiles_data = 'idle', []; self.last_match_time = pygame.time.get_ticks(); self.last_move_time = self.last_match_time; self.shuffle_refused = False
         elif self.shuffle_anim_state == 'settling': self.shuffle_anim_state, self.shuffle_tiles_data = 'idle', []; self.shuffle_refused = False
 
     def update_level_animations(self):
         if self.level_anim_state == 'in':
             self.level_anim_progress = min(1.0, self.level_anim_progress + 0.0056)
             if self.level_anim_progress == 1.0: 
-                self.level_anim_state = 'idle'; now = self.pause_start_ticks if self.is_paused else pygame.time.get_ticks(); self.start_ticks, self.last_match_time, self.last_move_time = now, now, now
+                self.level_anim_state = 'idle'; now = pygame.time.get_ticks(); self.start_ticks, self.last_match_time, self.last_move_time = now, now, now
                 self.level_transition_idx = random.randint(0, 11)
         elif self.level_anim_state == 'out':
             self.level_anim_progress = max(0.0, self.level_anim_progress - 0.0056)
@@ -762,7 +762,6 @@ class MahjongGame:
                 if getattr(self, 'open_stats_after_win', False): self.open_stats_after_win = False; self.stats_ui_state, self.stats_scroll_y = 'opening', 0; self.stats_sort_col = None; self.stats_sort_reverse = False; self.stats_display_indices = list(range(len(self.layout_names))); self.pause_start_ticks = pygame.time.get_ticks()
                 else: self.reset_game(getattr(self, 'next_level_to_load', None)); self.next_level_to_load = None
         if self.shuffle_needed and self.shuffle_ui_state == 'closed' and self.shuffle_anim_state == 'idle': 
-            if not self.is_paused: self.pause_start_ticks = pygame.time.get_ticks()
             self.shuffle_ui_state, self.shuffle_ui_progress = 'opening', 0.0
         if self.shuffle_ui_state == 'opening':
             self.shuffle_ui_progress = min(1.0, self.shuffle_ui_progress + 0.08)
@@ -770,12 +769,10 @@ class MahjongGame:
         elif self.shuffle_ui_state == 'closing':
             self.shuffle_ui_progress = max(0.0, self.shuffle_ui_progress - 0.08)
             if self.shuffle_ui_progress <= 0.0:
-                self.shuffle_ui_state = 'post_closing_wait'
-                self.shuffle_post_close_time = pygame.time.get_ticks()
+                self.shuffle_ui_state = 'post_closing_wait'; self.shuffle_post_close_time = pygame.time.get_ticks()
         elif self.shuffle_ui_state == 'post_closing_wait':
             if pygame.time.get_ticks() - self.shuffle_post_close_time > 500:
                 self.shuffle_ui_state = 'closed'
-                if not self.is_paused: paused_duration = pygame.time.get_ticks() - self.pause_start_ticks; self.adjust_times_after_pause(paused_duration)
                 if self.shuffle_confirmed: sp = getattr(self, 'shuffle_confirm_btn', None); self.start_shuffle_animation(sp.center if sp else None); self.shuffle_confirmed = False
                 else: self.shuffle_needed = False; self.shuffle_refused = True
         if self.stats_ui_state == 'open' and self.row_click_time > 0:
@@ -808,14 +805,39 @@ class MahjongGame:
         self.update_level_animations(); self.update_ui_animations()
         if self.bg_transition_progress < 1.0: self.bg_transition_progress = min(1.0, self.bg_transition_progress + 0.0056)
         self.update_victory_animation()
-        
-        # Update particles
         new_particles = []
         for p in self.particles:
             p['pos'][0] += p['vel'][0]; p['pos'][1] += p['vel'][1]; p['life'] -= 10
             if p['life'] > 0: new_particles.append(p)
         self.particles = new_particles
-
+        fin = []
+        for a in self.animating_tiles:
+            phase, zm = a.get('phase'), a.get('zoom_mod', 1.0)
+            if phase == 'meeting':
+                a['progress'] += 0.0225; p = a['progress']
+                # Use smoothstep for a softer start and end of the meeting phase
+                t = p * p * (3 - 2 * p)
+                a['scale'] = 1.0 + np.sin(t * np.pi / 2) * 0.3 * zm
+                if p >= 1.0:
+                    a['pos'] = list(a['mid_pos']); a['phase'] = 'to_pile'; a['progress'] = 0.0; a['impact_pos'] = list(a['mid_pos']); a['impact_scale'] = 1.0 + 0.3 * zm
+                    if a == self.animating_tiles[-1]: self.spawn_particles(a['mid_pos'][0] + self.tw//2, a['mid_pos'][1] + self.th//2)
+                else:
+                    p0, p1, p2 = a['start_pos'], a['cp'], a['mid_pos']
+                    a['pos'] = [(1-t)**2 * p0[0] + 2*(1-t)*t*p1[0] + t**2 * p2[0], (1-t)**2 * p0[1] + 2*(1-t)*t*p1[1] + t**2 * p2[1]]
+            elif phase == 'to_pile':
+                a['progress'] += 0.015; p = a['progress']
+                # Easing for the movement towards the pile
+                t = p * p * (3 - 2 * p)
+                a['scale'] = a.get('impact_scale', 1.0) + np.sin(t * np.pi) * 0.4 * zm
+                if p >= 1.0: a['pos'] = list(a['target']); fin.append(a); a['scale'] = 1.0
+                else:
+                    sp, ep = a['impact_pos'], a['target']; arc = np.sin(t * np.pi) * 150
+                    a['pos'] = [sp[0] + (ep[0] - sp[0]) * t, sp[1] + (ep[1] - sp[1]) * t - arc]
+            else:
+                target = a.get('target', (0,0)); dx, dy = target[0]-a['pos'][0], target[1]-a['pos'][1]; dist = (dx**2+dy**2)**0.5; speed = 12; a['scale'] = 1.0
+                if dist < speed: a['pos'] = list(target); fin.append(a)
+                else: a['pos'][0] += (dx/dist)*speed; a['pos'][1] += (dy/dist)*speed
+        for a in fin: self.animating_tiles.remove(a); self.matched_tiles.append(a)
         if self.is_paused: return
         self.update_shuffle_animation(); self.update_history_animations()
         rem_s = []
@@ -826,7 +848,6 @@ class MahjongGame:
         self.flying_scores = rem_s
         if self.displayed_score < self.current_score: self.displayed_score += max(1, int((self.current_score - self.displayed_score) * 0.1))
         elif self.displayed_score > self.current_score: self.displayed_score -= max(1, int((self.displayed_score - self.current_score) * 0.1))
-        
         if self.level_anim_state in ('idle', 'clearing_shades') and self.shuffle_anim_state in ('idle', 'fading_out'):
             all_clear = True
             for t in self.layout:
@@ -836,53 +857,19 @@ class MahjongGame:
                 elif ca > ta: t['gray_alpha'] = max(ta, ca - 2.5); all_clear = False
             if self.level_anim_state == 'clearing_shades' and all_clear:
                 self.level_anim_state = 'out'; self.level_anim_progress = 1.0
-        
-        fin = []
-        for a in self.animating_tiles:
-            phase = a.get('phase')
-            zm = a.get('zoom_mod', 1.0)
-            if phase == 'meeting':
-                a['progress'] += 0.0225 
-                p = a['progress']
-                # Altitude: Stay high at impact (use half-sine for 0->1 transition)
-                a['scale'] = 1.0 + np.sin(p * np.pi / 2) * 0.3 * zm
-                if p >= 1.0:
-                    a['pos'] = list(a['mid_pos']); a['phase'] = 'to_pile'; a['progress'] = 0.0; a['impact_pos'] = list(a['mid_pos'])
-                    # Initial scale for to_pile is the impact scale
-                    a['impact_scale'] = 1.0 + 0.3 * zm
-                    if a == self.animating_tiles[-1]: self.spawn_particles(a['mid_pos'][0] + self.tw//2, a['mid_pos'][1] + self.th//2)
-                else:
-                    p0, p1, p2 = a['start_pos'], a['cp'], a['mid_pos']; t = p
-                    a['pos'] = [(1-t)**2 * p0[0] + 2*(1-t)*t*p1[0] + t**2 * p2[0], (1-t)**2 * p0[1] + 2*(1-t)*t*p1[1] + t**2 * p2[1]]
-            
-            elif phase == 'to_pile':
-                a['progress'] += 0.015 
-                p = a['progress']
-                # Altitude: Start from impact height, peak higher, then land
-                impact_s = a.get('impact_scale', 1.0)
-                a['scale'] = impact_s + np.sin(p * np.pi) * 0.4 * zm
-                if p >= 1.0: a['pos'] = list(a['target']); fin.append(a); a['scale'] = 1.0
-                else:
-                    sp, ep = a['impact_pos'], a['target']; arc = np.sin(p * np.pi) * 150
-                    a['pos'] = [sp[0] + (ep[0] - sp[0]) * p, sp[1] + (ep[1] - sp[1]) * p - arc]
-            else:
-                target = a.get('target', (0,0))
-                dx, dy = target[0]-a['pos'][0], target[1]-a['pos'][1]; dist = (dx**2+dy**2)**0.5
-                speed = 12; a['scale'] = 1.0
-                if dist < speed: a['pos'] = list(target); fin.append(a)
-                else: a['pos'][0] += (dx/dist)*speed; a['pos'][1] += (dy/dist)*speed
-        
-        for a in fin: self.animating_tiles.remove(a); self.matched_tiles.append(a)
-        
-        if not self.won and not self.lost and not self.animating_tiles and self.level_anim_state == 'idle':
-            if not self.layout:
-                self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
-                self.won = True; self.matched_tiles = []; self.show_history = False
-            elif not self.has_moves():
-                if self.check_loss_condition():
-                    self.lost = True; self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks); self.show_history = False; self.win_ui_state, self.win_ui_progress = 'opening', 0.0
-                elif not self.shuffle_needed and self.shuffle_anim_state == 'idle' and not getattr(self, 'shuffle_refused', False):
-                    self.shuffle_needed = True
+        if self.level_anim_state == 'idle':
+            if not self.won and not self.lost:
+                # Victory: Wait for flying tiles to finish
+                if not self.layout and not self.animating_tiles:
+                    if self.final_time is None: self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
+                    self.won = True; self.matched_tiles = []; self.show_history = False
+                # Shuffle/Loss: Trigger immediately when layout has no moves, even if tiles are flying
+                elif self.layout and not self.has_moves():
+                    if self.check_loss_condition():
+                        if not self.animating_tiles: # For total blockage, we still wait for clarity
+                            self.lost = True; self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks); self.show_history = False; self.win_ui_state, self.win_ui_progress = 'opening', 0.0
+                    elif not self.shuffle_needed and self.shuffle_anim_state == 'idle' and not getattr(self, 'shuffle_refused', False):
+                        self.shuffle_needed = True
 
     def update_history_animations(self):
         if self.history_anim_state == 'opening':
@@ -999,12 +986,8 @@ class MahjongGame:
     def reset_game(self, l_id=None):
         self.won, self.lost = False, False
         if self.final_time is None: self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
-        # If board is empty (win), we wait for victory tiles to finish draining before starting next level
-        if not self.layout:
-            self.next_layout_id, self.level_anim_state, self.level_anim_progress = l_id, 'out', 0.0
-        else:
-            # Manual skip or loss: clear shades first, then do the standard 'out' movement
-            self.next_layout_id, self.level_anim_state = l_id, 'clearing_shades'
+        if not self.layout: self.next_layout_id, self.level_anim_state, self.level_anim_progress = l_id, 'out', 0.0
+        else: self.next_layout_id, self.level_anim_state = l_id, 'clearing_shades'
 
     def draw_cartridge(self, surface, rect, color=(0, 0, 0, 140), border_color=(218, 165, 32, 180)):
         s = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA); pygame.draw.rect(s, color, (0, 0, rect.width, rect.height), border_radius=12); pygame.draw.rect(s, border_color, (0, 0, rect.width, rect.height), 1, border_radius=12); surface.blit(s, rect.topleft)
@@ -1013,22 +996,18 @@ class MahjongGame:
         self.update_animations()
         if self.bg_transition_progress < 1.0 and self.scaled_prev_bg:
             self.screen.blit(self.scaled_prev_bg, (0, 0))
-            if self.scaled_bg: self.scaled_bg.set_alpha(int(255 * self.bg_transition_progress)); self.screen.blit(self.scaled_bg, (0, 0))
-        elif self.scaled_bg: self.screen.blit(self.scaled_bg, (0, 0))
-        else: self.screen.fill((34, 139, 34))
+            if self.scaled_bg:
+                self.scaled_bg.set_alpha(int(255 * self.bg_transition_progress))
+                self.screen.blit(self.scaled_bg, (0, 0))
+        elif self.scaled_bg:
+            self.screen.blit(self.scaled_bg, (0, 0))
+        else:
+            self.screen.fill((34, 139, 34))
+        
         ov_bg = pygame.Surface((self.width, self.height), pygame.SRCALPHA); ov_bg.fill((0, 0, 0, 40)); self.screen.blit(ov_bg, (0, 0))
         def get_tile_anim_params(t, idx, tot):
             if self.level_anim_state == 'idle' and self.level_anim_progress == 1.0: return {'off':(0,0), 'scale':1.0, 'rot':0, 'alpha':255}
-            
-            gx, gy, gz = t['pos']
-            cx, cy = self.layout_w_tiles / 2.0, self.layout_h_tiles / 2.0
-            dist_to_center = ((gx - cx)**2 + (gy - cy)**2)**0.5
-            angle_to_center = np.arctan2(gy - cy, gx - cx)
-            
-            style = self.level_transition_idx % 12
-            p = self.level_anim_progress if self.level_anim_state == 'in' else 1.0 - self.level_anim_progress
-            
-            # Animation factors (staggered delays)
+            gx, gy, gz = t['pos']; cx, cy = self.layout_w_tiles / 2.0, self.layout_h_tiles / 2.0; dist_to_center = ((gx - cx)**2 + (gy - cy)**2)**0.5; angle_to_center = np.arctan2(gy - cy, gx - cx); style = self.level_transition_idx % 12; p = self.level_anim_progress if self.level_anim_state == 'in' else 1.0 - self.level_anim_progress
             if style == 0: f = (idx / tot) * 0.5
             elif style == 1: f = (1.0 - dist_to_center / (max(cx, cy) * 1.5)) * 0.5
             elif style == 2: f = t.get('anim_factor', random.random() * 0.5)
@@ -1042,47 +1021,26 @@ class MahjongGame:
             elif style == 10: f = ((idx * 137) % tot / tot) * 0.5
             elif style == 11: f = (gx / self.layout_w_tiles if int(gy*2)%2==0 else 1.0 - gx / self.layout_w_tiles) * 0.5
             else: f = (idx / tot) * 0.5
-
-            tile_p = max(0, min(1, (p - f) / 0.5))
-            if self.level_anim_state == 'in': visual_p = tile_p
-            else: visual_p = 1.0 - tile_p
-            
-            ease_io = 4 * visual_p**3 if visual_p < 0.5 else 1 - pow(-2 * visual_p + 2, 3) / 2
-            ease_elastic = 1 + 2.70158 * pow(visual_p - 1, 3) + 1.70158 * pow(visual_p - 1, 2) if visual_p > 0 else 0
-            
-            res = {'off':(0,0), 'scale':1.0, 'rot':0, 'alpha':255}
-            inv_v = 1.0 - visual_p
-            
-            # Offsets are forced to be large enough to go off-screen
-            off_h, off_v = self.width + 200, self.height + 200
-            
-            if style == 0: res['off'] = (0, -off_v * inv_v**2) # Fall from top
-            elif style == 1: # Spiral from outside
-                res['off'] = (np.cos(angle_to_center + inv_v*5) * inv_v * off_h, np.sin(angle_to_center + inv_v*5) * inv_v * off_v)
-                res['rot'] = inv_v * 360
-            elif style == 2: res['off'] = (0, -off_v * inv_v**2); res['scale'] = 0.2 + 0.8 * visual_p # Rain drops
-            elif style == 3: res['off'] = (-off_h * inv_v, -off_v * inv_v) # Diagonal sweep
-            elif style == 4: res['rot'] = inv_v * 720; res['off'] = (0, off_v * inv_v) # Spin and rise
-            elif style == 5: # Checkerboard alternating directions
-                if (int(gx) + int(gy)) % 2 == 0: res['off'] = (-off_h * inv_v, 0)
-                else: res['off'] = (off_h * inv_v, 0)
-            elif style == 6: # Vortex
-                res['rot'] = inv_v * 360; res['off'] = (np.cos(inv_v*4)*inv_v*off_h, np.sin(inv_v*4)*inv_v*off_v)
-            elif style == 7: # Elastic bounce from top
+            tile_p = max(0, min(1, (p - f) / 0.5)); visual_p = tile_p if self.level_anim_state == 'in' else 1.0 - tile_p; ease_elastic = 1 + 2.70158 * pow(visual_p - 1, 3) + 1.70158 * pow(visual_p - 1, 2) if visual_p > 0 else 0; res = {'off':(0,0), 'scale':1.0, 'rot':0, 'alpha':255}; inv_v = 1.0 - visual_p; off_h, off_v = self.width + 200, self.height + 200
+            if style == 0: res['off'] = (0, -off_v * inv_v**2)
+            elif style == 1: res['off'] = (np.cos(angle_to_center + inv_v*5) * inv_v * off_h, np.sin(angle_to_center + inv_v*5) * inv_v * off_v); res['rot'] = inv_v * 360
+            elif style == 2: res['off'] = (0, -off_v * inv_v**2); res['scale'] = 0.2 + 0.8 * visual_p
+            elif style == 3: res['off'] = (-off_h * inv_v, -off_v * inv_v)
+            elif style == 4: res['rot'] = inv_v * 720; res['off'] = (0, off_v * inv_v)
+            elif style == 5: res['off'] = ((-off_h if (int(gx)+int(gy))%2==0 else off_h) * inv_v, 0)
+            elif style == 6: res['rot'] = inv_v * 360; res['off'] = (np.cos(inv_v*4)*inv_v*off_h, np.sin(inv_v*4)*inv_v*off_v)
+            elif style == 7:
                 if self.level_anim_state == 'in': res['off'] = (0, -off_v * (1.0 - ease_elastic))
                 else: res['off'] = (0, off_v * tile_p**2)
-            elif style == 8: res['rot'] = inv_v * 1080; res['off'] = (off_h * inv_v, off_v * inv_v) # Extreme spin corner
-            elif style == 9: res['off'] = (0, off_v * inv_v); res['scale'] = visual_p # Pop rise
-            elif style == 10: # Binary - fly in from random edge based on tile index
+            elif style == 8: res['rot'] = inv_v * 1080; res['off'] = (off_h * inv_v, off_v * inv_v)
+            elif style == 9: res['off'] = (0, off_v * inv_v); res['scale'] = visual_p
+            elif style == 10:
                 edge = (idx * 137) % 4
                 if edge == 0: res['off'] = (0, -off_v * inv_v)
                 elif edge == 1: res['off'] = (0, off_v * inv_v)
                 elif edge == 2: res['off'] = (-off_h * inv_v, 0)
                 else: res['off'] = (off_h * inv_v, 0)
-            elif style == 11: # Cross Sweep rows
-                if int(gy*2)%2==0: res['off'] = (-off_h * inv_v, 0)
-                else: res['off'] = (off_h * inv_v, 0)
-            
+            elif style == 11: res['off'] = ((-off_h if int(gy*2)%2==0 else off_h) * inv_v, 0)
             return res
 
         mx, my = self.board_offset_x, self.board_offset_y
@@ -1098,38 +1056,26 @@ class MahjongGame:
         else:
             self.sorted_layout.sort(key=lambda t: (t['pos'][2], t['pos'][0] + t['pos'][1])); tot = len(self.sorted_layout); rad = max(3, int(self.tw/12))
             for i,t in enumerate(self.sorted_layout):
-                anim = get_tile_anim_params(t, i, tot)
-                ox, oy = anim['off']
-                fx, fy = mx+t['pos'][0]*(self.tw+2)-t['pos'][2]*self.depth_off + ox, my+t['pos'][1]*(self.th+2)-t['pos'][2]*self.depth_off + oy
-                t['rect'] = pygame.Rect(fx,fy,self.tw,self.th)
-                
-                # Use pre-rendered 3D variant for opaque tiles to allow correct rotation of thickness
+                anim = get_tile_anim_params(t, i, tot); ox, oy = anim['off']; fx, fy = mx+t['pos'][0]*(self.tw+2)-t['pos'][2]*self.depth_off + ox, my+t['pos'][1]*(self.th+2)-t['pos'][2]*self.depth_off + oy; t['rect'] = pygame.Rect(fx,fy,self.tw,self.th)
                 if anim['alpha'] == 255: img = self.tile_variants[t['type']]['3d']
                 else: img = self.tile_variants[t['type']]['filtered']
-                
                 if anim['scale'] != 1.0 or anim['rot'] != 0:
                     if anim['scale'] <= 0: continue
-                    sw, sh = int(img.get_width() * anim['scale']), int(img.get_height() * anim['scale'])
-                    img = pygame.transform.smoothscale(img, (max(1, sw), max(1, sh)))
+                    sw, sh = int(img.get_width() * anim['scale']), int(img.get_height() * anim['scale']); img = pygame.transform.smoothscale(img, (max(1, sw), max(1, sh)))
                     if anim['rot'] != 0: img = pygame.transform.rotate(img, anim['rot'])
-                
                 if anim['alpha'] < 255:
                     if anim['alpha'] <= 0: continue
                     img = img.copy(); img.set_alpha(anim['alpha'])
-                
-                # Align the blit correctly (rotate around face center)
                 if anim['rot'] != 0: blit_pos = img.get_rect(center=t['rect'].center).topleft
                 else: blit_pos = t['rect'].topleft
-                
                 if self.is_paused: self.screen.blit(self.blank_tile_3d, t['rect'].topleft)
                 else: self.screen.blit(img, blit_pos)
-                
-                # Shading only visible in stable states
                 if self.level_anim_state in ('idle', 'clearing_shades'):
                     ga = t.get('gray_alpha', 0.0)
                     if ga > 0 and anim['alpha'] == 255:
-                        self.gray_overlay.set_alpha(int(ga))
-                        self.screen.blit(self.gray_overlay, blit_pos)
+                        ov = self.gray_overlay
+                        if anim['scale'] != 1.0: ov = pygame.transform.smoothscale(ov, (int(self.tw * anim['scale']), int(self.th * anim['scale'])))
+                        ov.set_alpha(int(ga)); self.screen.blit(ov, blit_pos)
                 if self.selected==t: pygame.draw.rect(self.screen,(255,255,0),t['rect'],6,5)
                 elif self.hint_pair and t in self.hint_pair: alp = int(128+127*np.sin(pygame.time.get_ticks()*0.01)); s=pygame.Surface((self.tw,self.th),pygame.SRCALPHA); pygame.draw.rect(s,(0,191,255,alp),s.get_rect(),8,5); self.screen.blit(s,blit_pos)
         f_ui, f_val, f_sub = pygame.font.SysFont("Arial", 20, bold=True), pygame.font.SysFont("Arial", 22, bold=True), pygame.font.SysFont("Arial", 16, bold=True)
@@ -1137,8 +1083,7 @@ class MahjongGame:
         elif self.level_anim_state != 'idle': el = 0
         elif self.is_paused: el = max(0, (self.pause_start_ticks - self.start_ticks) // 1000)
         else: el = max(0, (pygame.time.get_ticks() - self.start_ticks) // 1000)
-        timer_str = f"{el//60:02}:{el%60:02}"
-        self.draw_cartridge(self.screen, pygame.Rect(20, 20, 180, 65)); self.screen.blit(f_sub.render("TEMPS", True, (180, 180, 180)), (30, 30)); self.screen.blit(f_val.render(timer_str, True, (255, 255, 255)), (100, 26)); self.screen.blit(f_sub.render("SCORE", True, (180, 180, 180)), (30, 55)); self.screen.blit(f_val.render(str(self.displayed_score), True, (255, 215, 0)), (100, 51))
+        timer_str = f"{el//60:02}:{el%60:02}"; self.draw_cartridge(self.screen, pygame.Rect(20, 20, 180, 65)); self.screen.blit(f_sub.render("TEMPS", True, (180, 180, 180)), (30, 30)); self.screen.blit(f_val.render(timer_str, True, (255, 255, 255)), (100, 26)); self.screen.blit(f_sub.render("SCORE", True, (180, 180, 180)), (30, 55)); self.screen.blit(f_val.render(str(self.displayed_score), True, (255, 215, 0)), (100, 51))
         rem = len(self.layout) + len(self.animating_tiles); poss = self.count_moves(); tr_w, tr_h = 240, 65
         if self.shuffle_count > 0: tr_h += 25
         if self.hint_count > 0: tr_h += 25
@@ -1147,13 +1092,10 @@ class MahjongGame:
         if self.shuffle_count > 0: self.screen.blit(f_sub.render("MÉLANGES", True, (180, 180, 180)), (self.width - tr_w - 5, curr_y)); self.screen.blit(f_val.render(str(self.shuffle_count), True, (255, 140, 0)), (self.width - 78, curr_y - 4)); curr_y += 25
         if self.hint_count > 0: self.screen.blit(f_sub.render("INDICES", True, (180, 180, 180)), (self.width - tr_w - 5, curr_y)); self.screen.blit(f_val.render(str(self.hint_count), True, (180, 120, 220)), (self.width - 78, curr_y - 4))
         level_display_name = self.current_layout_name; ln_surf = f_ui.render(level_display_name, True, (255, 255, 255)); ln_w = ln_surf.get_width() + 40; self.draw_cartridge(self.screen, pygame.Rect(self.width//2 - ln_w//2, 20, ln_w, 40), color=(0, 0, 0, 180)); self.screen.blit(ln_surf, (self.width//2 - ln_surf.get_width()//2, 28))
-        mt_tot = len(self.matched_tiles); rad = max(3, int(self.tw/12))
         if not self.won and self.level_anim_state == 'idle' and self.victory_anim_state == 'idle':
             for i, t in enumerate(self.matched_tiles):
-                # We use idle anim params for matched tiles in the "pile"
                 x, y = t['pos']; self.screen.blit(self.shadow_surf, (x + 2, y + 2))
-                for j in range(self.depth_off, 0, -1):
-                    fac = (self.depth_off - j) / (self.depth_off - 1) if self.depth_off > 1 else 1.0; v = int(100 + (160 - 100) * (fac**3)); side_c = (75, 50, 25) if j >= self.depth_off - 1 else (v, int(v*0.96), int(v*0.85)); pygame.draw.rect(self.screen, side_c, pygame.Rect(x, y, self.tw, self.th).move(j, j), border_radius=rad)
+                for j in range(self.depth_off, 0, -1): fac = (self.depth_off - j) / (self.depth_off - 1) if self.depth_off > 1 else 1.0; v = int(100 + (160 - 100) * (fac**3)); side_c = (75, 50, 25) if j >= self.depth_off - 1 else (v, int(v*0.96), int(v*0.85)); pygame.draw.rect(self.screen, side_c, pygame.Rect(x, y, self.tw, self.th).move(j, j), border_radius=rad)
                 self.screen.blit(self.tile_variants[t['image_index']]['filtered'], (x, y))
         if self.victory_tiles:
             for t in self.victory_tiles:
@@ -1163,37 +1105,29 @@ class MahjongGame:
                     if tw > 0 and th > 0: img = pygame.transform.smoothscale(img, (tw, th))
                 if abs(t['rot']) > 0.1: img = pygame.transform.rotate(img, t['rot'])
                 rect = img.get_rect(center=(int(t['pos'][0] + (self.tw + self.depth_off) * scale // 2), int(t['pos'][1] + (self.th + self.depth_off) * scale // 2))); self.screen.blit(img, rect)
-        at_tot = len(self.animating_tiles + self.undo_animating_tiles)
         for i, a in enumerate(self.animating_tiles + self.undo_animating_tiles):
-            x, y = a['pos']; scale = a.get('scale', 1.0)
-            # Use 3D variant for flying tiles
-            img = self.tile_variants[a['image_index']]['3d']
+            x, y = a['pos']; scale = a.get('scale', 1.0); img = self.tile_variants[a['image_index']]['3d']
             if scale != 1.0:
                 sw, sh = int(img.get_width() * scale), int(img.get_height() * scale)
                 img = pygame.transform.smoothscale(img, (max(1, sw), max(1, sh)))
-            
-            # Center the tile while zooming so it doesn't shift
-            rect = img.get_rect(center=(int(x + self.tw // 2), int(y + self.th // 2)))
-            self.screen.blit(img, rect)
+            # Align the face center with the animated path, accounting for 3D thickness to avoid "jumps"
+            bx = x - (self.tw * (scale - 1.0)) / 2.0
+            by = y - (self.th * (scale - 1.0)) / 2.0
+            self.screen.blit(img, (int(bx), int(by)))
         if not self.won and (self.show_history or self.history_anim_state != 'idle' or self.history_anim_progress > 0):
             csy, ih, start_y = self.height - self.th - 15, self.th + 15, 110; vh = self.matched_tiles[-(max(1, (csy-start_y)//ih)*2):]; hp = [(vh[i], vh[i+1]) for i in range(0, len(vh), 2) if i+1 < len(vh)]; hp.reverse(); self.history_rects = []; e = 1-(1-self.history_anim_progress)**3; tx1, tx2 = self.width-self.tw-25, self.width-self.tw*2-40
             for idx, p in enumerate(hp):
                 ty = start_y+idx*ih; cy = csy+(ty-csy)*e if ty+ih<=csy else ty; pr = pygame.Rect(tx2-8,cy-8,(tx1-tx2)+self.tw+16,self.th+16)
                 for j in range(self.depth_off, 0, -1): fac = (self.depth_off - j) / (self.depth_off - 1) if self.depth_off > 1 else 1.0; v = int(100 + (160 - 100) * (fac**3)); side_c = (75, 50, 25) if j >= self.depth_off - 1 else (v, int(v*0.96), int(v*0.85)); pygame.draw.rect(self.screen, side_c, pygame.Rect(tx2, cy, self.tw, self.th).move(j, j), border_radius=5); pygame.draw.rect(self.screen, side_c, pygame.Rect(tx1, cy, self.tw, self.th).move(j, j), border_radius=5)
-                if self.is_paused: self.screen.blit(self.blank_tile, (tx2, cy)); self.screen.blit(self.blank_tile, (tx1, cy))
+                if self.is_paused: self.screen.blit(self.blank_tile_3d, (tx2, cy)); self.screen.blit(self.blank_tile_3d, (tx1, cy))
                 else: self.screen.blit(self.tile_variants[p[0]['image_index']]['filtered'], (tx2, cy)); self.screen.blit(self.tile_variants[p[1]['image_index']]['filtered'], (tx1, cy))
                 if self.show_history and self.history_anim_state == 'idle': pygame.draw.rect(self.screen, (200, 200, 255), pr, 2, 10); self.history_rects.append({'rect': pr, 'index': len(self.matched_tiles)-2-idx*2, 'p1': (tx2, cy), 'p2': (tx1, cy)})
         if self.flying_scores:
             f_score = pygame.font.SysFont("Arial", 40, bold=True)
             for s in self.flying_scores:
                 p = s['progress']; ease_p = 1.0-(1.0-p)**2; curr_x = s['pos'][0]+(s['target'][0]-s['pos'][0])*ease_p; curr_y = s['pos'][1]+(s['target'][1]-s['pos'][1])*ease_p; val = s.get('score_value', 0); color = (255, 100, 100) if val < 0 else (255, 215, 0); txt_surf = f_score.render(s['text'], True, color); shadow_surf = f_score.render(s['text'], True, (0, 0, 0)); txt_rect = txt_surf.get_rect(center=(int(curr_x), int(curr_y))); self.screen.blit(shadow_surf, txt_rect.move(3, 3)); self.screen.blit(txt_surf, txt_rect)
-        
-        # Draw particles
         for p in self.particles:
-            s = pygame.Surface((p['size']*2, p['size']*2), pygame.SRCALPHA)
-            pygame.draw.circle(s, p['color'] + (p['life'],), (p['size'], p['size']), p['size'])
-            self.screen.blit(s, (p['pos'][0]-p['size'], p['pos'][1]-p['size']))
-
+            s = pygame.Surface((p['size']*2, p['size']*2), pygame.SRCALPHA); pygame.draw.circle(s, p['color'] + (p['life'],), (p['size'], p['size']), p['size']); self.screen.blit(s, (p['pos'][0]-p['size'], p['pos'][1]-p['size']))
         if not self.won and self.history_anim_state == 'idle' and self.shuffle_ui_state == 'closed' and self.win_ui_state == 'closed':
             bw, bh, gap = 145, 38, 12; bx, by = 20, self.height - bh - 20; f_btn, m_pos = pygame.font.SysFont("Arial", 16, True), pygame.mouse.get_pos()
             self.stats_btn_rect = pygame.Rect(bx, by, bw, bh); self.draw_button(self.screen, self.stats_btn_rect, "Statistiques", (50, 100, 100), f_btn, self.stats_btn_rect.collidepoint(m_pos), self.pressed_button == "stats")
@@ -1203,12 +1137,7 @@ class MahjongGame:
             self.manual_shuffle_btn_rect = pygame.Rect(bx + bw + gap, by - (bh + gap + 5), bw, bh); self.draw_button(self.screen, self.manual_shuffle_btn_rect, "Mélanger", (180, 100, 0), f_btn, self.manual_shuffle_btn_rect.collidepoint(m_pos), self.pressed_button == "manual_shuffle")
             self.pause_btn_rect = pygame.Rect(bx + (bw + gap) * 2, by - (bh + gap + 5), bw, bh); p_text = "Reprendre" if self.is_manual_paused else "Pause"; self.draw_button(self.screen, self.pause_btn_rect, p_text, (160, 120, 30), f_btn, self.pause_btn_rect.collidepoint(m_pos), self.pressed_button == "pause")
         if self.win_ui_progress > 0:
-            ov = pygame.Surface((self.width,self.height), pygame.SRCALPHA); ov.fill((0,0,0,int(200 * self.win_ui_progress))); self.screen.blit(ov,(0,0)); pw, ph = 650, 540; win_surf = pygame.Surface((pw, ph), pygame.SRCALPHA); pygame.draw.rect(win_surf, (30, 30, 35, 255), (0, 0, pw, ph), border_radius=25); border_color = (150, 50, 50, 255) if self.lost else (218, 165, 32, 255); pygame.draw.rect(win_surf, border_color, (0, 0, pw, ph), 4, border_radius=25); header_text = "DÉFAITE" if self.lost else "VICTOIRE"; header_color = (200, 50, 50) if self.lost else (255, 215, 0); f_title = pygame.font.SysFont("Arial", 70, True); t_shadow = f_title.render(header_text, True, (0, 0, 0)); t_main = f_title.render(header_text, True, header_color); win_surf.blit(t_shadow, t_shadow.get_rect(center=(pw//2 + 3, 73))); win_surf.blit(t_main, t_main.get_rect(center=(pw//2, 70))); 
-            if self.lost:
-                if self.check_loss_condition(): st_text = "Niveau bloqué ! Tuiles empilées."
-                else: st_text = "Plus de combinaisons possibles !"
-            else: st_text = self.current_layout_name
-            st = pygame.font.SysFont("Arial", 24, italic=True).render(st_text, True, (200, 200, 200)); win_surf.blit(st, st.get_rect(center=(pw//2, 130))); pygame.draw.line(win_surf, (100, 100, 100), (80, 160), (pw-80, 160), 1); f_stats, f_label, f_record, f_highlight = pygame.font.SysFont("Arial", 20), pygame.font.SysFont("Arial", 16, bold=True), pygame.font.SysFont("Arial", 16, italic=True, bold=True), pygame.font.SysFont("Arial", 42, True); stats = self.last_win_stats or {}; time_block_color = (60, 40, 40) if self.lost else (40, 45, 40); time_border_color = (150, 50, 50) if self.lost else (46, 139, 87); pygame.draw.rect(win_surf, time_block_color, (80, 185, 230, 110), border_radius=15); pygame.draw.rect(win_surf, time_border_color, (80, 185, 230, 110), 2, border_radius=15); win_surf.blit(f_label.render("TEMPS", True, time_border_color), (95, 195)); time_str = self.format_time(self.final_time); t_val_h = f_highlight.render(time_str, True, (255, 255, 255)); win_surf.blit(t_val_h, t_val_h.get_rect(center=(195, 235))); best_time = stats.get("prev_best_time")
+            ov = pygame.Surface((self.width,self.height), pygame.SRCALPHA); ov.fill((0,0,0,int(200 * self.win_ui_progress))); self.screen.blit(ov,(0,0)); pw, ph = 650, 540; win_surf = pygame.Surface((pw, ph), pygame.SRCALPHA); pygame.draw.rect(win_surf, (30, 30, 35, 255), (0, 0, pw, ph), border_radius=25); border_color = (150, 50, 50, 255) if self.lost else (218, 165, 32, 255); pygame.draw.rect(win_surf, border_color, (0, 0, pw, ph), 4, border_radius=25); header_text = "DÉFAITE" if self.lost else "VICTOIRE"; header_color = (200, 50, 50) if self.lost else (255, 215, 0); f_title = pygame.font.SysFont("Arial", 70, True); t_shadow = f_title.render(header_text, True, (0, 0, 0)); t_main = f_title.render(header_text, True, header_color); win_surf.blit(t_shadow, t_shadow.get_rect(center=(pw//2 + 3, 73))); win_surf.blit(t_main, t_main.get_rect(center=(pw//2, 70))); st_text = ("Niveau bloqué ! Tuiles empilées." if self.lost and self.check_loss_condition() else "Plus de combinaisons possibles !" if self.lost else self.current_layout_name); st = pygame.font.SysFont("Arial", 24, italic=True).render(st_text, True, (200, 200, 200)); win_surf.blit(st, st.get_rect(center=(pw//2, 130))); pygame.draw.line(win_surf, (100, 100, 100), (80, 160), (pw-80, 160), 1); f_stats, f_label, f_record, f_highlight = pygame.font.SysFont("Arial", 20), pygame.font.SysFont("Arial", 16, bold=True), pygame.font.SysFont("Arial", 16, italic=True, bold=True), pygame.font.SysFont("Arial", 42, True); stats = self.last_win_stats or {}; time_block_color = (60, 40, 40) if self.lost else (40, 45, 40); time_border_color = (150, 50, 50) if self.lost else (46, 139, 87); pygame.draw.rect(win_surf, time_block_color, (80, 185, 230, 110), border_radius=15); pygame.draw.rect(win_surf, time_border_color, (80, 185, 230, 110), 2, border_radius=15); win_surf.blit(f_label.render("TEMPS", True, time_border_color), (95, 195)); time_str = self.format_time(self.final_time); t_val_h = f_highlight.render(time_str, True, (255, 255, 255)); win_surf.blit(t_val_h, t_val_h.get_rect(center=(195, 235))); best_time = stats.get("prev_best_time")
             if not self.lost:
                 if stats.get("is_new_time_record"): win_surf.blit(f_record.render("NOUVEAU RECORD !", True, (0, 255, 127)), (95, 265))
                 elif best_time is not None and 0 < best_time < 99999999: win_surf.blit(f_stats.render(f"Record : {self.format_time(best_time)}", True, (160, 160, 160)), (95, 265))
@@ -1299,7 +1228,8 @@ class MahjongGame:
         self.screen.blit(scaled_surf, (sx, sy))
 
     def draw_options_ui(self):
-        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA); overlay.fill((0, 0, 0, int(180 * self.options_ui_progress))); self.screen.blit(overlay, (0, 0)); sw, sh, scale = 700, 540, 0.8 + 0.2 * self.options_ui_progress; w, h = int(sw * scale), int(sh * scale); x, y = (self.width - w) // 2, (self.height - h) // 2; panel = pygame.Surface((sw, sh), pygame.SRCALPHA); pygame.draw.rect(panel, (30, 30, 35, 255), (0, 0, sw, ph), border_radius=20); pygame.draw.rect(panel, (218, 165, 32, 255), (0, 0, sw, sh), 4, border_radius=20); f_title, f_msg = pygame.font.SysFont("Arial", 32, True), pygame.font.SysFont("Arial", 22); title_surf = f_title.render("Options", True, (255, 255, 255)); panel.blit(title_surf, title_surf.get_rect(centerx=sw//2, y=30)); m_pos = pygame.mouse.get_pos(); adj_m_pos = ((m_pos[0] - x) / scale, (m_pos[1] - y) / scale); start_y, spacing = 110, 80; opt_configs = [("Ombrage des tuiles bloquées :", 'show_gray_tiles', 'toggle_gray_rect'), ("Indice automatique :", 'auto_hint', 'toggle_hint_rect')]
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA); overlay.fill((0, 0, 0, int(180 * self.options_ui_progress))); self.screen.blit(overlay, (0, 0)); sw, sh, scale = 700, 540, 0.8 + 0.2 * self.options_ui_progress; w, h = int(sw * scale), int(sh * scale); x, y = (self.width - w) // 2, (self.height - h) // 2
+        panel = pygame.Surface((sw, sh), pygame.SRCALPHA); pygame.draw.rect(panel, (30, 30, 35, 255), (0, 0, sw, sh), border_radius=20); pygame.draw.rect(panel, (218, 165, 32, 255), (0, 0, sw, sh), 4, border_radius=20); f_title, f_msg = pygame.font.SysFont("Arial", 32, True), pygame.font.SysFont("Arial", 22); title_surf = f_title.render("Options", True, (255, 255, 255)); panel.blit(title_surf, title_surf.get_rect(centerx=sw//2, y=30)); m_pos = pygame.mouse.get_pos(); adj_m_pos = ((m_pos[0] - x) / scale, (m_pos[1] - y) / scale); start_y, spacing = 110, 80; opt_configs = [("Ombrage des tuiles bloquées :", 'show_gray_tiles', 'toggle_gray_rect'), ("Indice automatique :", 'auto_hint', 'toggle_hint_rect')]
         for i, (txt, attr, rect_name) in enumerate(opt_configs):
             oy = start_y + i * spacing; label = f_msg.render(txt, True, (220, 220, 220)); panel.blit(label, (50, oy)); rect = pygame.Rect(sw - 130, oy - 5, 80, 34); setattr(self, rect_name, rect); val = getattr(self, attr); t_color = (46, 139, 87) if val else (100, 100, 110)
             if rect.collidepoint(adj_m_pos): t_color = tuple(min(255, c + 20) for c in t_color)
@@ -1363,11 +1293,7 @@ class MahjongGame:
                 if self.hint_pair and t in self.hint_pair:
                     t1, t2 = self.hint_pair; self.start_match_animation(t1, t2); self.selected, self.hint_pair, self.last_move_time = None, None, pygame.time.get_ticks(); self.last_match_time = pygame.time.get_ticks(); self.match_multiplier = 1.0
                     if not self.layout: 
-                        self.won = True
-                        if self.final_time is None: self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
-                    elif not self.has_moves():
-                        if self.check_loss_condition(): self.lost = True; self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks); self.show_history = False; self.win_ui_state, self.win_ui_progress = 'opening', 0.0
-                        else: self.shuffle_needed = True
+                        self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
                     return
                 self.last_move_time, self.hint_pair = pygame.time.get_ticks(), None
                 if self.selected:
@@ -1379,11 +1305,7 @@ class MahjongGame:
                         if t['rect']: sx, sy = t['rect'].center; tx, ty = self.get_score_target_pos(); self.flying_scores.append({'pos': [sx, sy], 'target': (tx, ty), 'text': f"+{move_score}", 'score_value': move_score, 'progress': 0.0})
                         self.start_match_animation(self.selected, t); self.selected = None
                         if not self.layout: 
-                            self.won = True
-                            if self.final_time is None: self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
-                        elif not self.has_moves():
-                            if self.check_loss_condition(): self.lost = True; self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks); self.show_history = False; self.win_ui_state, self.win_ui_progress = 'opening', 0.0
-                            else: self.shuffle_needed = True
+                            self.final_time = max(0, pygame.time.get_ticks() - self.start_ticks)
                     else: self.selected = t
                 else: self.selected = t
                 return
