@@ -670,7 +670,7 @@ class MahjongGame:
     def _execute_shuffle_logic(self):
         self.matched_tiles = []; self.shuffle_count += 1; self.total_shuffles += 1; self.shuffle_anim_state = 'moving'; self.selected = None
         old_data = [{'type': t['type'], 'pos': t['pos']} for t in self.layout]; current_types = [t['type'] for t in self.layout]; self.make_solvable(types_pool=current_types); self.update_sorted_layout(); self.shuffle_tiles_data = []
-        mx, my = self.board_offset_x, self.board_offset_y; used_old = [False] * len(old_data); self.shuffle_duration = 1400; self.shuffle_start_time = pygame.time.get_ticks()
+        mx, my = self.board_offset_x, self.board_offset_y; used_old = [False] * len(old_data); self.shuffle_duration = 1800; self.shuffle_start_time = pygame.time.get_ticks()
         for t in self.layout:
             target_type = t['type']; found_idx = -1
             for j, old in enumerate(old_data):
@@ -678,8 +678,12 @@ class MahjongGame:
             if found_idx != -1:
                 old = old_data[found_idx]; sx = mx + old['pos'][0]*(self.tw+2) - old['pos'][2]*self.depth_off; sy = my + old['pos'][1]*(self.th+2) - old['pos'][2]*self.depth_off
                 ex = mx + t['pos'][0]*(self.tw+2) - t['pos'][2]*self.depth_off; ey = my + t['pos'][1]*(self.th+2) - t['pos'][2]*self.depth_off
+                dist = ((ex - sx)**2 + (ey - sy)**2)**0.5
+                # Dynamically adjust speed_mod based on distance to keep speed reasonable.
+                # Reference distance: 600px -> speed_mod = 1.0. For 1200px -> speed_mod ~ 0.8
+                base_speed_mod = 1.0 / (1.0 + (dist / 1200.0)) * 1.5
                 sz = old['pos'][2] * 10000 + old['pos'][1] * 100 + old['pos'][0]; ez = t['pos'][2] * 10000 + t['pos'][1] * 100 + t['pos'][0]
-                self.shuffle_tiles_data.append({'type': target_type, 'start_pos': (sx, sy), 'current_pos': [sx, sy], 'end_pos': (ex, ey), 'tile': t, 'start_z': sz, 'end_z': ez, 'delay': random.uniform(0, 0.4), 'speed_mod': random.uniform(0.8, 1.2), 'arc_strength': random.uniform(80, 250), 'arc_dir': random.uniform(-1.0, 1.0), 'max_tilt': random.uniform(-60, 60), 'scale_mod': random.uniform(0.3, 0.6), 'rot': 0.0, 'scale': 1.0, 'arc_sin': 0.0, 'phase': random.uniform(0, 2*np.pi)})
+                self.shuffle_tiles_data.append({'type': target_type, 'start_pos': (sx, sy), 'current_pos': [sx, sy], 'end_pos': (ex, ey), 'tile': t, 'start_z': sz, 'end_z': ez, 'delay': random.uniform(0, 0.4), 'speed_mod': base_speed_mod * random.uniform(0.9, 1.1), 'arc_strength': random.uniform(80, 250), 'arc_dir': random.uniform(-1.0, 1.0), 'max_tilt': random.uniform(-60, 60), 'scale_mod': random.uniform(0.3, 0.6), 'rot': 0.0, 'scale': 1.0, 'arc_sin': 0.0, 'phase': random.uniform(0, 2*np.pi)})
         self.shuffle_tiles_data.sort(key=lambda d: d['start_z'])
 
     def update_shuffle_animation(self):
