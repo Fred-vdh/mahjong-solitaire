@@ -672,7 +672,7 @@ class MahjongGame:
                 if not used_old[j] and old['type'] == target_type: found_idx = j; used_old[j] = True; break
             if found_idx != -1:
                 old = old_data[found_idx]; sx = mx + old['pos'][0]*(self.tw+2) - old['pos'][2]*self.depth_off; sy = my + old['pos'][1]*(self.th+2) - old['pos'][2]*self.depth_off
-                ex = mx + t['pos'][0]*(self.tw+2) - t['pos'][2]*self.depth_off; ey = my + t['pos'][1]*(self.th+2) - t['pos'][2]*self.depth_off
+                ex = round(mx + t['pos'][0]*(self.tw+2) - t['pos'][2]*self.depth_off); ey = round(my + t['pos'][1]*(self.th+2) - t['pos'][2]*self.depth_off)
                 dist = ((ex - sx)**2 + (ey - sy)**2)**0.5
                 # Dynamically adjust speed_mod based on distance to keep speed reasonable.
                 # Reference distance: 600px -> speed_mod = 1.0. For 1200px -> speed_mod ~ 0.8
@@ -727,6 +727,7 @@ class MahjongGame:
                     swirl_r = 60 * arc_sin; d['current_pos'][0] = base_x + np.cos(tile_prog * np.pi * 6 + d['phase']) * swirl_r; d['current_pos'][1] = base_y + np.sin(tile_prog * np.pi * 6 + d['phase']) * swirl_r
                     d['rot'] = tile_prog * 360; d['scale'] = 1.0
                 d['current_pos'][0] = max(-200, min(self.width + 200, d['current_pos'][0])); d['current_pos'][1] = max(-200, min(self.height + 200, d['current_pos'][1])); d['current_z'] = d['start_z'] + (d['end_z'] - d['start_z']) * tile_prog
+                if tile_prog >= 1.0: d['current_pos'] = list(d['end_pos'])
             self.shuffle_tiles_data.sort(key=lambda d: d['current_z'])
             if all_finished and total_prog >= 1.0:
                 self.shuffle_anim_idx = random.randint(0, 8); self.shuffle_anim_state, self.shuffle_tiles_data = 'idle', []; self.last_match_time = pygame.time.get_ticks(); self.last_move_time = self.last_match_time; self.shuffle_refused = False
@@ -1060,7 +1061,7 @@ class MahjongGame:
                     if sw > 0 and th > 0: img = pygame.transform.smoothscale(img, (sw, th))
                 sw, th = img.get_size(); rot = d.get('rot', 0.0)
                 if abs(rot) > 0.1: img = pygame.transform.rotate(img, rot)
-                cx, cy = x + sw / 2.0, y + th / 2.0; rect = img.get_rect(); rect.x = int(cx - img.get_width() / 2.0); rect.y = int(cy - img.get_height() / 2.0); self.screen.blit(self.shadow_surf, rect.move(sh_off, sh_off)); self.screen.blit(img, rect)
+                cx, cy = x + sw / 2.0, y + th / 2.0; rect = img.get_rect(); rect.x = round(cx - img.get_width() / 2.0); rect.y = round(cy - img.get_height() / 2.0); self.screen.blit(self.shadow_surf, rect.move(sh_off, sh_off)); self.screen.blit(img, rect)
         else:
             self.sorted_layout.sort(key=lambda t: (t['pos'][2], t['pos'][0] + t['pos'][1])); tot = len(self.sorted_layout); rad = max(3, int(self.tw/12))
             for i,t in enumerate(self.sorted_layout):
