@@ -348,34 +348,30 @@ class MahjongGame:
         pos = getattr(self, 'current_layout_pos', None)
         if pos:
             # Calcul du footprint visuel réel (tenant compte du décalage Z de chaque tuile)
-            # Pour chaque tuile (gx, gy, gz), sa position écran Y est :
-            # screen_y = board_offset_y + gy * (th + 2) - gz * depth_off
-            
-            # On cherche les extrêmes de (gy * (th + 2) - gz * depth_off)
+            x_vis_vals = [p[0] * (self.tw + 2) - p[2] * self.depth_off for p in pos]
+            min_x_vis = min(x_vis_vals); max_x_vis = max(x_vis_vals) + self.tw
+            span_x = max_x_vis - min_x_vis
+
             y_vis_vals = [p[1] * (self.th + 2) - p[2] * self.depth_off for p in pos]
-            min_y_vis = min(y_vis_vals)
-            max_y_vis = max(y_vis_vals) + self.th # +th pour inclure le bas de la tuile
-            
+            min_y_vis = min(y_vis_vals); max_y_vis = max(y_vis_vals) + self.th
             span_y = max_y_vis - min_y_vis
             
             if span_y > available_h:
                 ratio = available_h / span_y
-                self.th = int(self.th * ratio)
-                self.tw = int(self.th / 1.33)
+                self.th = int(self.th * ratio); self.tw = int(self.th / 1.33)
                 self.depth_off = max(2, int((self.tw // 10 + 1) * 1.2))
-                # Recalcul après changement d'échelle
+                x_vis_vals = [p[0] * (self.tw + 2) - p[2] * self.depth_off for p in pos]
+                min_x_vis = min(x_vis_vals); max_x_vis = max(x_vis_vals) + self.tw
+                span_x = max_x_vis - min_x_vis
                 y_vis_vals = [p[1] * (self.th + 2) - p[2] * self.depth_off for p in pos]
-                min_y_vis = min(y_vis_vals)
-                max_y_vis = max(y_vis_vals) + self.th
+                min_y_vis = min(y_vis_vals); max_y_vis = max(y_vis_vals) + self.th
                 span_y = max_y_vis - min_y_vis
 
-            gap_y = (available_h - span_y) // 2
-            # On veut que top_margin + gap_y soit égal à board_offset_y + min_y_vis
-            self.board_offset_y = top_margin + gap_y - min_y_vis
+            self.board_offset_x = int(margin_x + (available_w - span_x) // 2 - min_x_vis)
+            self.board_offset_y = int(top_margin + (available_h - span_y) // 2 - min_y_vis)
         else:
-            self.board_offset_y = top_margin + (available_h - self.layout_h_tiles * (self.th + 2)) // 2
-
-        self.board_offset_x = margin_x + (available_w - self.layout_w_tiles * (self.tw + 2)) // 2
+            self.board_offset_x = int(margin_x + (available_w - self.layout_w_tiles * (self.tw + 2)) // 2)
+            self.board_offset_y = int(top_margin + (available_h - self.layout_h_tiles * (self.th + 2)) // 2)
         
         self.tile_variants = []
         self.std_tile_variants = []
