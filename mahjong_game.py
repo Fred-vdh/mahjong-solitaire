@@ -347,7 +347,6 @@ class MahjongGame:
         
         pos = getattr(self, 'current_layout_pos', None)
         if pos:
-            # Calcul du footprint visuel réel (tenant compte du décalage Z de chaque tuile)
             x_vis_vals = [p[0] * (self.tw + 2) - p[2] * self.depth_off for p in pos]
             min_x_vis = min(x_vis_vals); max_x_vis = max(x_vis_vals) + self.tw
             span_x = max_x_vis - min_x_vis
@@ -367,11 +366,11 @@ class MahjongGame:
                 min_y_vis = min(y_vis_vals); max_y_vis = max(y_vis_vals) + self.th
                 span_y = max_y_vis - min_y_vis
 
-            self.board_offset_x = int(margin_x + (available_w - span_x) // 2 - min_x_vis)
-            self.board_offset_y = int(top_margin + (available_h - span_y) // 2 - min_y_vis)
+            self.board_offset_x = round(margin_x + (available_w - span_x) / 2.0 - min_x_vis)
+            self.board_offset_y = round(top_margin + (available_h - span_y) / 2.0 - min_y_vis)
         else:
-            self.board_offset_x = int(margin_x + (available_w - self.layout_w_tiles * (self.tw + 2)) // 2)
-            self.board_offset_y = int(top_margin + (available_h - self.layout_h_tiles * (self.th + 2)) // 2)
+            self.board_offset_x = round(margin_x + (available_w - self.layout_w_tiles * (self.tw + 2)) / 2.0)
+            self.board_offset_y = round(top_margin + (available_h - self.layout_h_tiles * (self.th + 2)) / 2.0)
         
         self.tile_variants = []
         self.std_tile_variants = []
@@ -1006,7 +1005,7 @@ class MahjongGame:
         
         ov_bg = pygame.Surface((self.width, self.height), pygame.SRCALPHA); ov_bg.fill((0, 0, 0, 40)); self.screen.blit(ov_bg, (0, 0))
         def get_tile_anim_params(t, idx, tot):
-            if self.level_anim_state == 'idle' and self.level_anim_progress == 1.0: return {'off':(0,0), 'scale':1.0, 'rot':0, 'alpha':255}
+            if self.level_anim_state in ('idle', 'clearing_shades') and self.level_anim_progress == 1.0: return {'off':(0,0), 'scale':1.0, 'rot':0, 'alpha':255}
             gx, gy, gz = t['pos']; cx, cy = self.layout_w_tiles / 2.0, self.layout_h_tiles / 2.0; dist_to_center = ((gx - cx)**2 + (gy - cy)**2)**0.5; angle_to_center = np.arctan2(gy - cy, gx - cx); style = self.level_transition_idx % 12; p = self.level_anim_progress if self.level_anim_state == 'in' else 1.0 - self.level_anim_progress
             
             # Animation delay factor (f)
@@ -1042,7 +1041,7 @@ class MahjongGame:
                 if self.level_anim_state == 'in': res['off'] = (0, -off_v * (1.0 - ease_elastic))
                 else: res['off'] = (0, off_v * tile_p**2)
             elif style == 8: res['rot'] = inv_v * 1080; res['off'] = (off_h * inv_v, off_v * inv_v)
-            elif style == 9: res['off'] = (0, off_v * inv_v); res['scale'] = visual_p * (1.0 + (gz / 5.0) * 0.2)
+            elif style == 9: res['off'] = (0, off_v * inv_v); res['scale'] = visual_p * (1.0 + (gz / 5.0) * 0.2 * inv_v)
             elif style == 10:
                 edge = (idx * 137) % 4
                 if edge == 0: res['off'] = (0, -off_v * inv_v)
@@ -1065,7 +1064,7 @@ class MahjongGame:
         else:
             self.sorted_layout.sort(key=lambda t: (t['pos'][2], t['pos'][0] + t['pos'][1])); tot = len(self.sorted_layout); rad = max(3, int(self.tw/12))
             for i,t in enumerate(self.sorted_layout):
-                anim = get_tile_anim_params(t, i, tot); ox, oy = anim['off']; fx, fy = mx+t['pos'][0]*(self.tw+2)-t['pos'][2]*self.depth_off + ox, my+t['pos'][1]*(self.th+2)-t['pos'][2]*self.depth_off + oy; t['rect'] = pygame.Rect(fx,fy,self.tw,self.th)
+                anim = get_tile_anim_params(t, i, tot); ox, oy = anim['off']; fx, fy = round(mx+t['pos'][0]*(self.tw+2)-t['pos'][2]*self.depth_off + ox), round(my+t['pos'][1]*(self.th+2)-t['pos'][2]*self.depth_off + oy); t['rect'] = pygame.Rect(fx,fy,self.tw,self.th)
                 if anim['alpha'] == 255: img = self.tile_variants[t['type']]['3d']
                 else: img = self.tile_variants[t['type']]['filtered']
                 if anim['scale'] != 1.0 or anim['rot'] != 0:
