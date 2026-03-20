@@ -1012,6 +1012,8 @@ class MahjongGame:
         def get_tile_anim_params(t, idx, tot):
             if self.level_anim_state == 'idle' and self.level_anim_progress == 1.0: return {'off':(0,0), 'scale':1.0, 'rot':0, 'alpha':255}
             gx, gy, gz = t['pos']; cx, cy = self.layout_w_tiles / 2.0, self.layout_h_tiles / 2.0; dist_to_center = ((gx - cx)**2 + (gy - cy)**2)**0.5; angle_to_center = np.arctan2(gy - cy, gx - cx); style = self.level_transition_idx % 12; p = self.level_anim_progress if self.level_anim_state == 'in' else 1.0 - self.level_anim_progress
+            
+            # Animation delay factor (f)
             if style == 0: f = (idx / tot) * 0.5
             elif style == 1: f = (1.0 - dist_to_center / (max(cx, cy) * 1.5)) * 0.5
             elif style == 2: f = t.get('anim_factor', random.random() * 0.5)
@@ -1021,11 +1023,17 @@ class MahjongGame:
             elif style == 6: f = (angle_to_center / (2 * np.pi) + 0.5) * 0.5
             elif style == 7: f = (gy / self.layout_h_tiles) * 0.5
             elif style == 8: f = (idx / tot) * 0.5
-            elif style == 9: f = (1.0 - gy / self.layout_h_tiles) * 0.5
+            elif style == 9: f = (1.0 - gz / 5.0) * 0.5 # Depth-based delay (higher tiles first)
             elif style == 10: f = ((idx * 137) % tot / tot) * 0.5
             elif style == 11: f = (gx / self.layout_w_tiles if int(gy*2)%2==0 else 1.0 - gx / self.layout_w_tiles) * 0.5
             else: f = (idx / tot) * 0.5
-            tile_p = max(0, min(1, (p - f) / 0.5)); visual_p = tile_p if self.level_anim_state == 'in' else 1.0 - tile_p; ease_elastic = 1 + 2.70158 * pow(visual_p - 1, 3) + 1.70158 * pow(visual_p - 1, 2) if visual_p > 0 else 0; res = {'off':(0,0), 'scale':1.0, 'rot':0, 'alpha':255}; inv_v = 1.0 - visual_p; off_h, off_v = self.width + 200, self.height + 200
+
+            tile_p = max(0, min(1, (p - f) / 0.5))
+            visual_p = tile_p if self.level_anim_state == 'in' else 1.0 - tile_p
+            inv_v = 1.0 - visual_p
+            res = {'off':(0,0), 'scale':1.0, 'rot':0, 'alpha':255}
+            off_h, off_v = self.width + 200, self.height + 200
+
             if style == 0: res['off'] = (0, -off_v * inv_v**2)
             elif style == 1: res['off'] = (np.cos(angle_to_center + inv_v*5) * inv_v * off_h, np.sin(angle_to_center + inv_v*5) * inv_v * off_v); res['rot'] = inv_v * 360
             elif style == 2: res['off'] = (0, -off_v * inv_v**2); res['scale'] = 0.2 + 0.8 * visual_p
@@ -1034,10 +1042,11 @@ class MahjongGame:
             elif style == 5: res['off'] = ((-off_h if (int(gx)+int(gy))%2==0 else off_h) * inv_v, 0)
             elif style == 6: res['rot'] = inv_v * 360; res['off'] = (np.cos(inv_v*4)*inv_v*off_h, np.sin(inv_v*4)*inv_v*off_v)
             elif style == 7:
+                ease_elastic = 1 + 2.70158 * pow(visual_p - 1, 3) + 1.70158 * pow(visual_p - 1, 2) if visual_p > 0 else 0
                 if self.level_anim_state == 'in': res['off'] = (0, -off_v * (1.0 - ease_elastic))
                 else: res['off'] = (0, off_v * tile_p**2)
             elif style == 8: res['rot'] = inv_v * 1080; res['off'] = (off_h * inv_v, off_v * inv_v)
-            elif style == 9: res['off'] = (0, off_v * inv_v); res['scale'] = visual_p
+            elif style == 9: res['off'] = (0, off_v * inv_v); res['scale'] = visual_p * (1.0 + (gz / 5.0) * 0.2)
             elif style == 10:
                 edge = (idx * 137) % 4
                 if edge == 0: res['off'] = (0, -off_v * inv_v)
